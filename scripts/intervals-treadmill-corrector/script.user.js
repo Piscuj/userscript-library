@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Intervals.icu Treadmill Distance Corrector
 // @namespace    local.intervals-treadmill
-// @version      1.4.1
+// @version      1.4.2
 // @updateURL    https://piscuj.github.io/userscript-library/scripts/intervals-treadmill-corrector/script.meta.js
 // @downloadURL  https://piscuj.github.io/userscript-library/scripts/intervals-treadmill-corrector/script.user.js
 // @description  Correct treadmill distance and pace in Intervals.icu with FIT verification and original-file recovery.
@@ -159,7 +159,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-treadmill-corrector","version":"1.4.1","old":"1.4.0","services":["intervals","intervals-api"],"changes":["Saves applied stage layouts and restores them when reopening the same corrected FIT.","Stage speed edits and 0.01 km/h controls update total distance; speeds display two decimals.","Moderate dark theme, compact file actions, revised Based on selector, and totals below the stages."]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-treadmill-corrector","version":"1.4.2","old":"1.4.0","services":["intervals","intervals-api"],"changes":["Saves applied stage layouts and restores them when reopening the same corrected FIT.","Stage speed edits and 0.01 km/h controls update total distance; speeds display two decimals.","Moderate dark theme, compact file actions, revised Based on selector, and totals below the stages."]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 /* Bundled Garmin FIT SDK 21.218.0. License agreement:
 This Flexible and Interoperable Data Transfer (FIT) Protocol License Agreement
@@ -36319,6 +36319,8 @@ self.onmessage=event=>{
       const point = records[0], pointSpeed = point?.enhancedSpeed ?? point?.speed;
       if (coverage <= 1e-6 && records.length === 1 && Number.isFinite(point.distance) && Number.isFinite(pointSpeed) && Math.abs(distance) < 0.02)
         return { distance: 0, average_speed: pointSpeed, sampleOnly: true };
+      if (coverage <= 1e-6 && Math.abs(distance) < 0.02 && !records.some((r) => Number.isFinite(r.enhancedSpeed ?? r.speed)))
+        return { distance: 0, average_speed: 0, min_speed: 0, max_speed: 0, inactive: true };
       if (seconds <= 0) return Math.abs(distance) < 0.02 ? { distance: 0, average_speed: 0, min_speed: 0, max_speed: 0, inactive: true } : null;
       const speeds = records.map((r) => r.enhancedSpeed ?? r.speed).filter(Number.isFinite);
       return { distance, average_speed: distance / seconds, min_speed: speeds.reduce((n, v) => Math.min(n, v), Infinity), max_speed: speeds.reduce((n, v) => Math.max(n, v), -Infinity) };
@@ -36608,7 +36610,7 @@ self.onmessage=event=>{
   <table id="summary" class="comparison"><thead><tr><th>Version</th><th>Distance \xB7 pace \xB7 speed</th></tr></thead><tbody><tr><th>FIT samples</th><td id="before"></td></tr><tr><th>Corrected</th><td id="after"></td></tr></tbody></table>
   <label id="largeLabel" hidden><input id="large" type="checkbox"> I acknowledge a correction larger than 20%.</label>
   <label id="treadmillLabel" hidden><input id="treadmill" type="checkbox"> I confirm this is the treadmill workout I intend to correct.</label>
-  </div><div class="file-actions" role="group" aria-label="File actions"><div class="action-row"><button class="primary" id="apply" disabled>Apply Correction</button><button id="restore" hidden>Restore Original File</button><button id="key">Configure API key</button><button id="close">Close</button></div></div><p class="muted version">v1.4.1</p></section></div>`;
+  </div><div class="file-actions" role="group" aria-label="File actions"><div class="action-row"><button class="primary" id="apply" disabled>Apply Correction</button><button id="restore" hidden>Restore Original File</button><button id="key">Configure API key</button><button id="close">Close</button></div></div><p class="muted version">v1.4.2</p></section></div>`;
     const el = (name) => shadow.getElementById(name);
     const input = el("distance");
     const checked = (name) => el(name).checked;

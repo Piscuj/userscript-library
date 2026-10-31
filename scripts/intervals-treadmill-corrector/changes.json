@@ -1,4 +1,7 @@
 {
+  "1.4.2": [
+    "Interval checks accept the empty one-second interval Intervals.icu adds after the last FIT sample, instead of failing with \"distance missing\"."
+  ],
   "1.4.1": [
     "Updates now come from the new script library at piscuj.github.io/userscript-library. Install once from there; your settings are kept.",
     "Update all on the library page opens only the scripts that need an update."
