@@ -1,4 +1,9 @@
 {
+  "0.8.1": [
+    "Fixes Weight Lifted and RPE not being filled for the activity you have open. Intervals passes its activity store to a child component, so the script now falls back to the athlete's shared activity store.",
+    "If filling Weight Lifted or RPE fails, the reason now shows on the Liftosaur panel instead of only in Settings.",
+    "Retries automatically when Intervals' activity store finishes loading after the page."
+  ],
   "0.8.0": [
     "Uses much less CPU on Intervals pages: the script no longer scans the whole page structure on every change, and background checks run at most every 30 seconds.",
     "New tabs no longer load your entire Intervals history each time. The full scan runs at most twice a day, or when you choose Refresh and sync all.",

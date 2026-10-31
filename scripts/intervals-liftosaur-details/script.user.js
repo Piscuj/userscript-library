@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Intervals.icu Liftosaur Details
 // @namespace    piscuj.intervals.liftosaur-details
-// @version      0.8.0
+// @version      0.8.1
 // @description  Liftosaur sets in Intervals.icu with workout volume and volume-weighted RPE sync.
 // @match        https://intervals.icu/*
 // @match        https://www.intervals.icu/*
@@ -228,14 +228,14 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-liftosaur-details","version":"0.8.0","old":"0.6.0","services":["intervals","liftosaur"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-liftosaur-details","version":"0.8.1","old":"0.6.0","services":["intervals","liftosaur"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
   // Tampermonkey may expose the page's global Promise in Firefox. Async
   // functions still use this script's intrinsic constructor; keep them aligned.
   const Promise=(async()=>{})().constructor;
-  const VERSION = '0.8.0', PREFIX = 'liftosaur:v1:';
+  const VERSION = '0.8.1', PREFIX = 'liftosaur:v1:';
   function formatSet(set){return String(set?.raw||'Not completed').replace(/^1x/,'').replace(/^(\d+(?:[|\-]\d+)?\+?)\s+([+-]?\d+(?:\.\d+)?(?:kg|lb)\+?)/,'$1x$2');}
   // Liftosaur Weight_getOneRepMax / Weight_rpeMultiplier and History_maxSetBy:
   // https://github.com/astashov/liftosaur/blob/master/src/models/weight.ts
@@ -603,7 +603,15 @@ if(cc.onLibrary())return;
     }
     return null;
   }
-  const core={splitSections,parseRecord,rankRecords,automaticMatch,queryWindow,createCache,createHistoryCache,backfillActivities,createBrowserLockStore,createLeaseLock,pageCall,nativeTabForEvent,parseSets,compareSet,volume,exerciseStats,workoutVolume,formatVolume,workoutTime,formatSet,estimate1RM,liftHighlights,weightedRPE,nativeValues,nativePatch,createNativeSync};
+  // Intervals' ActivityPage receives only `activity`; its store reaches child components
+  // through a slot. The athlete's shared activity store saves any activity by id.
+  function nativeBridge(activity,candidates){
+    const store=candidates.find(s=>typeof s?.updateActivity==='function'&&typeof s?.refreshActivity==='function'&&(s.athlete?.id==null||String(s.athlete.id)===String(activity.icu_athlete_id)));
+    if(!store)return {error:'Native activity update bridge is unavailable. Reload Intervals or update this script.'};
+    if((activity.athlete?.icu_permission??store.athlete?.icu_permission)!=='WRITE')return {error:'Native sync requires write access to this athlete.'};
+    return {store};
+  }
+  const core={nativeBridge,splitSections,parseRecord,rankRecords,automaticMatch,queryWindow,createCache,createHistoryCache,backfillActivities,createBrowserLockStore,createLeaseLock,pageCall,nativeTabForEvent,parseSets,compareSet,volume,exerciseStats,workoutVolume,formatVolume,workoutTime,formatSet,estimate1RM,liftHighlights,weightedRPE,nativeValues,nativePatch,createNativeSync};
   if(typeof module==='object' && module.exports) {module.exports=core;return;}
   if(typeof document==='undefined') return;
 
@@ -614,7 +622,7 @@ if(cc.onLibrary())return;
   let panel=null, body=null, lastIdentity='', generation=0, queued=false;
   let customTab=null,nativeContent=null,tabBar=null,tabActive=false,activePath='',tabContainer=null;
   const nativeStates=new Map();
-  let syncEnabled=get(PREFIX+'native-sync-enabled')!==false,syncStatus='',syncBusy=false;
+  let syncEnabled=get(PREFIX+'native-sync-enabled')!==false,syncStatus='',syncBusy=false,syncFailed=false;
   const syncAttempts=new Set();
   let bulkBusy=false,bulkStatus='',bulkNoticeTimer,bulkNoticeAllowed=false;
   const bulkNoticeShown=new Set();
@@ -666,17 +674,20 @@ if(cc.onLibrary())return;
     // Reuse the mounted component and re-read its live props instead of walking
     // the whole Vue tree on every mutation and poll.
     const component=lastFound?.component,props=component?.props;
-    if(component&&!component.isUnmounted&&lastFound.el.isConnected&&usableActivity(props.activity,route[1]))return {...lastFound,activity:props.activity,store:props.activityStore};
-    let found=null;
+    if(component&&!component.isUnmounted&&lastFound.el.isConnected&&usableActivity(props.activity,route[1]))return {...lastFound,activity:props.activity,store:props.activityStore??lastFound.store};
+    let found=null,store;
     for(const root of page.document.querySelectorAll('[data-v-app]')) {
       walk(root.__vue_app__?._container?._vnode||root._vnode,vnode=>{
         const props=vnode.component?.props||vnode.props,activity=props?.activity;
         if(usableActivity(activity,route[1]) && vnode.el?.isConnected) {
           const name=vnode.component?.type?.__name||vnode.type?.__name;
+          store??=props.activityStore;
           if(name==='ActivityDetail'||!found)found={activity,el:vnode.el,store:props.activityStore,component:vnode.component};
         }
       });
     }
+    // The outer page component sets the panel position; any matching child may carry the store.
+    if(found)found.store??=store;
     lastFound=found;
     return found;
   }
@@ -810,6 +821,8 @@ if(cc.onLibrary())return;
       if(average.coverage<1&&average.value!==null)rpeNode.append(el('span',' ('+Math.round(average.coverage*100)+'% rated volume)','lft-muted'));
       totalNode.title='Completed reps x logged weight, including warmups. Both sides are added when recorded separately. Pounds are converted to kilograms. No equipment multiplier is guessed.';body.append(totalNode);
       if(total.partial)body.append(el('p','Some sets have no usable load. Volume includes only the sets with known weights.','lft-muted'));
+      // Native write problems must be visible without opening Settings.
+      if(syncFailed&&syncStatus)body.append(el('p',syncStatus+' Weight Lifted and RPE were not filled.','lft-error'));
       if(selected.notes)body.append(el('p',selected.notes,'lft-notes'));
       if(selected.exercises.length) {
         const scroll=el('div',null,'lft-scroll'),table=el('table'),head=el('thead'),headRow=el('tr');
@@ -867,14 +880,16 @@ if(cc.onLibrary())return;
     const selected=result?.records?.find(r=>r.id===result.selected);
     if(!current||!credentials?.scope||!selected||syncBusy||bulkBusy||(!force&&!syncEnabled))return;
     const context=current,scope=credentials.scope,id=identity(),values=nativeValues(selected),attempt=id+':'+JSON.stringify([selected.id,values]);
-    if(!force&&syncAttempts.has(attempt))return;syncAttempts.add(attempt);
-    if(context.activity.athlete?.icu_permission!=='WRITE'){syncStatus='Native sync requires write access to this athlete.';return;}
-    if(typeof context.store?.updateActivity!=='function'||typeof context.store?.refreshActivity!=='function'){syncStatus='Native activity update bridge is unavailable. Reload Intervals or update this script.';return;}
-    syncBusy=true;syncStatus='Saving native fields...';if(settingsOpen)render();
-    const run=createNativeSync({get,set,lock,update:(a,p)=>pageCall(context.store,'updateActivity',[a.id,p],'Saving native fields'),refresh:a=>pageCall(context.store,'refreshActivity',[a],'Verifying native fields')});
+    if(!force&&syncAttempts.has(attempt))return;
+    const bridge=nativeBridge(context.activity,[context.store,discoverSyncStore()]);
+    // The store can register after the page renders; retry an unavailable bridge on the next refresh.
+    if(!bridge.error||!/unavailable/.test(bridge.error))syncAttempts.add(attempt);
+    if(bridge.error){if(syncStatus!==bridge.error){syncStatus=bridge.error;syncFailed=true;render();}return;}
+    syncBusy=true;syncFailed=false;syncStatus='Saving native fields...';if(settingsOpen)render();
+    const run=createNativeSync({get,set,lock,update:(a,p)=>pageCall(bridge.store,'updateActivity',[a.id,p],'Saving native fields'),refresh:a=>pageCall(bridge.store,'refreshActivity',[a],'Verifying native fields')});
     try{const saved=await run(scope,context.activity,selected,force);if(identity()===id){syncStatus=saved.status;if(saved.patch)cc.record('intervals',{id:context.activity.icu_athlete_id,label:context.activity.athlete?.name,role:'selected athlete'},'success','Native fields saved and verified');}}
-    catch(e){if(identity()===id)syncStatus='Native sync failed: '+(e.message||'Check your connection and use Fill native fields now to retry.');}
-    finally{syncBusy=false;if(identity()===id&&settingsOpen)render();else schedule();}
+    catch(e){if(identity()===id){syncStatus='Native sync failed: '+(e.message||'Check your connection and use Fill native fields now to retry.');syncFailed=true;}}
+    finally{syncBusy=false;if(identity()===id)render();else schedule();}
   }
   function activateTab(active,updateHash=true) {
     tabActive=active;
@@ -966,7 +981,7 @@ if(cc.onLibrary())return;
     }
     current=found;const id=identity();
     tabActive=location.hash==='#liftosaur';activePath=location.pathname;
-    if(id!==lastIdentity){generation++;lastIdentity=id;result=viewResults.get(id)||null;error='';busy=false;choosing=false;syncStatus='';}
+    if(id!==lastIdentity){generation++;lastIdentity=id;result=viewResults.get(id)||null;error='';busy=false;choosing=false;syncStatus='';syncFailed=false;}
     if(!result&&viewResults.has(id)){result=viewResults.get(id);render();}
     if(!panel?.isConnected){panel=el('section');panel.id='lft-panel';panel.setAttribute('aria-label','Liftosaur exercises');
       const chart=found.el.querySelector?.('.activity-chart-area, .activity-charts');
