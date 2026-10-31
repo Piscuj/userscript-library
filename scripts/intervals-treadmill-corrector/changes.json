@@ -1,0 +1,11 @@
+{
+  "1.4.1": [
+    "Updates now come from the new script library at piscuj.github.io/userscript-library. Install once from there; your settings are kept.",
+    "Update all on the library page opens only the scripts that need an update."
+  ],
+  "1.4.0": [
+    "Saves applied stage layouts and restores them when reopening the same corrected FIT.",
+    "Stage speed edits and 0.01 km/h controls update total distance; speeds display two decimals.",
+    "Moderate dark theme, compact file actions, revised Based on selector, and totals below the stages."
+  ]
+}

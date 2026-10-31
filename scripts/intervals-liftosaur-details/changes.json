@@ -1,0 +1,11 @@
+{
+  "0.7.9": [
+    "Updates now come from the new script library at piscuj.github.io/userscript-library. Install once from there; your settings are kept.",
+    "Update all on the library page opens only the scripts that need an update."
+  ],
+  "0.7.8": [
+    "Loads the open workout independently of the background history scan, preventing an indefinite loading panel.",
+    "Bounds Intervals store calls to 30 seconds with a labelled retry error.",
+    "Preserves cached-first details, automatic matching and native tab navigation."
+  ]
+}

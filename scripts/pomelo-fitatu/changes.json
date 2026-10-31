@@ -1,0 +1,11 @@
+{
+  "0.3.5": [
+    "Updates now come from the new script library at piscuj.github.io/userscript-library. Install once from there; your settings are kept.",
+    "Update all on the library page opens only the scripts that need an update."
+  ],
+  "0.3.4": [
+    "Allow one displayed rounding step in either direction for kcal and macros (0.1 when one decimal is displayed).",
+    "Accept recipe-total versus summed-dish rounding differences such as 197.2 g versus 197.3 g. Larger differences and missing totals still block sending.",
+    "Retain selected-menu automatic loading, manual Refresh, day caches and duplicate protection."
+  ]
+}

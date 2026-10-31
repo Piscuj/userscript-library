@@ -1,0 +1,53 @@
+{
+  "title": "Script Library",
+  "origin": "https://piscuj.github.io",
+  "basePath": "/userscript-library/",
+  "scripts": [
+    {
+      "id": "intervals-treadmill-corrector",
+      "title": "Treadmill Distance Corrector",
+      "summary": "Correct treadmill distance and pace in Intervals.icu, with FIT verification and original-file recovery.",
+      "tags": ["Intervals.icu", "Running"],
+      "instructions": [
+        "Edit total distance or steady-speed stages on a Virtual Run.",
+        "Corrections preserve the activity ID, intervals and custom fields. The original FIT is retained for recovery."
+      ]
+    },
+    {
+      "id": "pomelo-fitatu",
+      "title": "Pomelo to Fitatu",
+      "summary": "Copy Pomelo meals, nutrition and ingredients to the matching Fitatu diary date.",
+      "tags": ["Pomelo", "Fitatu"],
+      "instructions": [
+        "Select one or more Pomelo meals to import. Existing diary entries are checked to avoid duplicates.",
+        "The panel starts minimized and follows the selected date in each app.",
+        "Before sending, the five loaded meals are summed and compared with Pomelo’s menu summary for kcal, protein, carbs and fat. Each value is rounded to Pomelo’s displayed precision, allowing one displayed step in either direction (0.1 kcal or g when one decimal is shown). Larger differences or missing totals block sending.",
+        "If sending is blocked, expand the panel to see Pomelo and list values, then use Refresh. The Fitatu processing tab also requires matching totals evidence before writing.",
+        "Ticked days (Menu zostało wybrane) load automatically. Default days (Wybierz menu / fork-and-spoon) stay unloaded on day changes; expand the panel and use Refresh to load them manually."
+      ]
+    },
+    {
+      "id": "intervals-nutrition-balance",
+      "title": "Nutrition Balance",
+      "summary": "Show daily calorie balance and weekly calorie and macro averages in the Intervals.icu calendar.",
+      "tags": ["Intervals.icu", "Nutrition"],
+      "instructions": [
+        "Daily balance is intake minus 2,200 base kcal and recorded activity calories.",
+        "Weekly averages exclude missing values and future days. Explicit zero values are included.",
+        "The script reads the loaded calendar without editing your records."
+      ]
+    },
+    {
+      "id": "intervals-liftosaur-details",
+      "title": "Liftosaur Details",
+      "summary": "Show Liftosaur sets in Intervals.icu and sync workout volume and volume-weighted RPE.",
+      "tags": ["Intervals.icu", "Liftosaur", "Strength"],
+      "instructions": [
+        "The Liftosaur tab shows completed sets, targets, volume and estimated one-rep maximums.",
+        "Workouts are automatically matched within two hours. Manual selections are preserved.",
+        "Background sync fills native Weight Lifted and RPE for historical workouts, preserving different manual values.",
+        "The initial sync notice dismisses after two seconds and stays quiet on later automatic view changes. Full sync status remains in Settings. An explicit Refresh all can show another brief notice."
+      ]
+    }
+  ]
+}

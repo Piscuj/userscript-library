@@ -1,0 +1,2 @@
+# Published scripts are hashed byte-for-byte; keep LF everywhere.
+* text=auto eol=lf
