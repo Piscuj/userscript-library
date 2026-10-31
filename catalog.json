@@ -34,6 +34,7 @@
       "instructions": [
         "Daily balance is intake minus 2,200 base kcal and recorded activity calories.",
         "Weekly averages exclude missing values and future days. Explicit zero values are included.",
+        "The weekly calorie balance also leaves out today until the day is over, because training calories usually arrive after intake.",
         "The script reads the loaded calendar without editing your records."
       ]
     },

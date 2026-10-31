@@ -1,4 +1,7 @@
 {
+  "0.4.4": [
+    "The current week’s average calorie balance leaves out today, since training calories are usually logged after the day’s intake. Weekly macro averages are unchanged."
+  ],
   "0.4.3": [
     "Weekly average balance now reads “xxx kcal” instead of “xxx kcal/day”. The tooltip still explains it is a daily average."
   ],
