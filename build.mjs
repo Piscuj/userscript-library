@@ -8,7 +8,7 @@ import { libraryUrls, readTag, splitHeader } from './tools/retarget-lib.mjs';
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const VERSION_PATTERN = /^\d+(?:\.\d+)*$/;
-const SITE_FILES = ['styles.css', 'model.js', 'app.js'];
+const SITE_FILES = ['styles.css', 'model.js', 'app.js', 'icon.svg', 'favicon.ico', 'apple-touch-icon.png'];
 
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -23,6 +23,9 @@ function page({ title, assets, body, scripts = [], data }) {
 <meta name="theme-color" content="#f6f6f3" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121519" media="(prefers-color-scheme: dark)">
 <title>${escape(title)}</title>
+<link rel="icon" href="${assets}favicon.ico" sizes="48x48">
+<link rel="icon" href="${assets}icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="${assets}apple-touch-icon.png">
 <link rel="stylesheet" href="${assets}styles.css">
 ${data ? `<script type="application/json" id="catalog-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>\n` : ''}${scripts.map(src => `<script src="${assets}${src}" defer></script>`).join('\n')}
 </head>
