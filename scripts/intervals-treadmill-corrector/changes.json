@@ -1,4 +1,7 @@
 {
+  "1.4.3": [
+    "Interval checks accept a final interval whose only FIT sample is stopped (0 km/h), which Intervals.icu leaves without distance or speed."
+  ],
   "1.4.2": [
     "Interval checks accept the empty one-second interval Intervals.icu adds after the last FIT sample, instead of failing with \"distance missing\"."
   ],
