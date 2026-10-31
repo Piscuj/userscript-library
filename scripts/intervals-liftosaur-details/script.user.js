@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Intervals.icu Liftosaur Details
 // @namespace    piscuj.intervals.liftosaur-details
-// @version      0.7.9
+// @version      0.8.0
 // @description  Liftosaur sets in Intervals.icu with workout volume and volume-weighted RPE sync.
 // @match        https://intervals.icu/*
 // @match        https://www.intervals.icu/*
@@ -228,14 +228,14 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-liftosaur-details","version":"0.7.9","old":"0.6.0","services":["intervals","liftosaur"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-liftosaur-details","version":"0.8.0","old":"0.6.0","services":["intervals","liftosaur"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
   // Tampermonkey may expose the page's global Promise in Firefox. Async
   // functions still use this script's intrinsic constructor; keep them aligned.
   const Promise=(async()=>{})().constructor;
-  const VERSION = '0.7.9', PREFIX = 'liftosaur:v1:';
+  const VERSION = '0.8.0', PREFIX = 'liftosaur:v1:';
   function formatSet(set){return String(set?.raw||'Not completed').replace(/^1x/,'').replace(/^(\d+(?:[|\-]\d+)?\+?)\s+([+-]?\d+(?:\.\d+)?(?:kg|lb)\+?)/,'$1x$2');}
   // Liftosaur Weight_getOneRepMax / Weight_rpeMultiplier and History_maxSetBy:
   // https://github.com/astashov/liftosaur/blob/master/src/models/weight.ts
@@ -322,6 +322,8 @@ if(cc.onLibrary())return;
     return async function run(scope,activity,record,force=false){
       const key=PREFIX+scope+':native:'+activity.icu_athlete_id+':'+activity.id,values=nativeValues(record),fingerprint=JSON.stringify([record.id,values]);
       if(!Object.keys(values).length)return {status:'No complete volume or usable logged RPE is available for native fields.',values};
+      // Read-only precheck: fields that already match need no cross-tab lease.
+      if(!Object.keys(nativePatch(activity,values,(await get(key))?.values||{},force)).length)return {status:'Native fields already match, or a different manual value was kept.',values};
       return lock(key,async assertHeld=>{
         const saved=await get(key)||{},before=saved.values||{};
         let patch=nativePatch(activity,values,before,force);
@@ -396,24 +398,35 @@ if(cc.onLibrary())return;
     const day=new Date(time).toISOString().slice(0,10), midnight=Date.parse(day+'T00:00:00Z');
     return {day,start:midnight-86400000,end:midnight+2*86400000};
   }
+  const RECHECK_MS=10*60*1000,RECHECK_UNTIL_MS=24*60*60*1000;
   function createCache({get,set,fetchHistory,lock=(_key,job)=>job(),now=Date.now}) {
     const pending=new Map();
     const storageKey=(scope,type,id)=>PREFIX+scope+':'+type+':'+id;
+    const activityKey=(scope,activity)=>storageKey(scope,'activity',String(activity.icu_athlete_id)+':'+String(activity.id));
+    const withMatch=saved=>({...saved,selected:saved.manual?saved.selected:saved.selected||automaticMatch(saved.records),source:'cache'});
+    // An automatic "no workout" can predate the Liftosaur upload. Recheck it every
+    // 10 minutes until one lookup has run a day after the activity ended.
+    function stale(saved,activity,at=now()){
+      if(!saved||saved.manual||!Array.isArray(saved.records)||withMatch(saved).selected)return false;
+      const ended=Date.parse(activity.start_date)+Number(activity.elapsed_time||activity.moving_time||0)*1000;
+      return saved.fetchedAt<ended+RECHECK_UNTIL_MS&&at-saved.fetchedAt>=RECHECK_MS;
+    }
     async function load(scope,activity,{force=false}={}) {
-      const id=String(activity.icu_athlete_id)+':'+String(activity.id), key=storageKey(scope,'activity',id);
+      const key=activityKey(scope,activity);
       if (pending.has(key)) return pending.get(key);
       const promise=lock(key,async()=>{
-        const previous=await get(key);
-        if (previous && !force) {
-          if(!previous.manual&&!previous.selected){previous.selected=automaticMatch(previous.records);await set(key,previous);}
-          return {...previous,source:'cache'};
+        const previous=await get(key),refetch=force||stale(previous,activity);
+        if (previous && !refetch) {
+          const value=withMatch(previous);
+          if(!previous.manual&&!previous.selected&&value.selected)await set(key,{...previous,selected:value.selected});
+          return value;
         }
         const window=queryWindow(activity), dayKey=storageKey(scope,'day',window.day);
         const day=await lock(dayKey,async()=>{
           const cached=await get(dayKey);
-          if(cached && !force) return cached;
+          if(cached && !refetch) return cached;
           const snapshot=await get(storageKey(scope,'history','all'));
-          const records=!force&&snapshot&&Date.parse(activity.start_date)<=snapshot.coveredThrough
+          const records=!refetch&&snapshot&&Date.parse(activity.start_date)<=snapshot.coveredThrough
             ? snapshot.records.filter(r=>{try{const t=parseRecord(r).start;return t>=window.start&&t<window.end;}catch{return false;}})
             : await fetchHistory(window);
           // Store the complete response before linking. A failed request never becomes an empty cache.
@@ -431,7 +444,7 @@ if(cc.onLibrary())return;
       try {return await promise;} finally {pending.delete(key);}
     }
     async function select(scope,activity,id) {
-      const key=storageKey(scope,'activity',String(activity.icu_athlete_id)+':'+String(activity.id));
+      const key=activityKey(scope,activity);
       return lock(key,async()=>{
         const entry=await get(key);
         if(!entry || (id!==null && !entry.records.some(r=>r.id===id))) throw new Error('Workout is not in the saved list.');
@@ -439,14 +452,13 @@ if(cc.onLibrary())return;
       });
     }
     async function ingest(scope,activity,records,fetchedAt){
-      const key=storageKey(scope,'activity',String(activity.icu_athlete_id)+':'+String(activity.id));
+      const key=activityKey(scope,activity),current=await get(key);
+      // A later per-activity Refresh must not be overwritten by an older full-history
+      // snapshot, and an entry already built from this snapshot needs no lease or rewrite.
+      if(current?.fetchedAt>=fetchedAt&&Array.isArray(current.records))return withMatch(current);
       return lock(key,async()=>{
         const previous=await get(key),window=queryWindow(activity),parsed=[],unsupported=[];
-        // A later per-activity Refresh must not be overwritten by an older full-history snapshot.
-        if(previous?.fetchedAt>fetchedAt){
-          if(!previous.manual&&!previous.selected){previous.selected=automaticMatch(previous.records);await set(key,previous);}
-          return {...previous,source:'cache'};
-        }
+        if(previous?.fetchedAt>=fetchedAt&&Array.isArray(previous.records))return withMatch(previous);
         for(const raw of records){try{const r=parseRecord(raw);if(r.start>=window.start&&r.start<window.end)parsed.push(r);}catch{unsupported.push(raw);}}
         if(previous?.manual&&previous.selected&&!parsed.some(r=>r.id===previous.selected)){
           const selected=previous.records.find(r=>r.id===previous.selected);if(selected)parsed.push(selected);
@@ -457,12 +469,10 @@ if(cc.onLibrary())return;
       });
     }
     function peek(scope,activity){
-      const key=storageKey(scope,'activity',String(activity.icu_athlete_id)+':'+String(activity.id)),saved=get(key);
-      if(!saved||!Array.isArray(saved.records))return null;
-      const selected=saved.manual?saved.selected:saved.selected||automaticMatch(saved.records);
-      return {...saved,selected,source:'cache'};
+      const saved=get(activityKey(scope,activity));
+      return saved&&Array.isArray(saved.records)?withMatch(saved):null;
     }
-    return {load,select,ingest,peek};
+    return {load,select,ingest,peek,stale};
   }
   function createHistoryCache({get,set,fetchHistory,lock=(_key,job)=>job(),now=Date.now}){
     return (scope,{through=now(),force=false}={})=>{
@@ -648,36 +658,47 @@ if(cc.onLibrary())return;
     if(Array.isArray(vnode.children))for(const child of vnode.children)walk(child,visit,seen);
     if(vnode.suspense?.activeBranch)walk(vnode.suspense.activeBranch,visit,seen);
   }
+  const usableActivity=(activity,id)=>activity&&String(activity.id)===id&&activity.type&&activity.icu_athlete_id!=null;
+  let lastFound=null;
   function discover() {
     const route=location.pathname.match(/^\/activities\/([^/]+)(?:\/|$)/);
     if(!route)return null;
+    // Reuse the mounted component and re-read its live props instead of walking
+    // the whole Vue tree on every mutation and poll.
+    const component=lastFound?.component,props=component?.props;
+    if(component&&!component.isUnmounted&&lastFound.el.isConnected&&usableActivity(props.activity,route[1]))return {...lastFound,activity:props.activity,store:props.activityStore};
     let found=null;
     for(const root of page.document.querySelectorAll('[data-v-app]')) {
       walk(root.__vue_app__?._container?._vnode||root._vnode,vnode=>{
         const props=vnode.component?.props||vnode.props,activity=props?.activity;
-        if(activity && String(activity.id)===route[1] && activity.type && activity.icu_athlete_id!=null && vnode.el?.isConnected) {
+        if(usableActivity(activity,route[1]) && vnode.el?.isConnected) {
           const name=vnode.component?.type?.__name||vnode.type?.__name;
-          if(name==='ActivityDetail'||!found)found={activity,el:vnode.el,store:props.activityStore};
+          if(name==='ActivityDetail'||!found)found={activity,el:vnode.el,store:props.activityStore,component:vnode.component};
         }
       });
     }
+    lastFound=found;
     return found;
   }
   function discoverSyncStore(){
     const stores=[],targets=[];let selected;
-    for(const root of page.document.querySelectorAll('[data-v-app]')){
-      const app=root.__vue_app__,pinia=app?.config?.globalProperties?.$pinia;
+    const usable=s=>s?.athlete?.icu_permission==='WRITE'&&Array.isArray(s.activities)&&typeof s.ensureActivities==='function'&&typeof s.updateActivity==='function'&&typeof s.refreshActivity==='function';
+    const pick=target=>{const choices=[...new Set(stores)].filter(usable);return target!=null?choices.find(s=>String(s.athlete.id)===String(target)):choices.length===1?choices[0]:null;};
+    const roots=[...page.document.querySelectorAll('[data-v-app]')];
+    for(const root of roots){
+      const pinia=root.__vue_app__?.config?.globalProperties?.$pinia;
       selected=pinia?._s?.get('current-athlete')?.athlete?.id??selected;
       if(pinia?._s)for(const value of pinia._s.values())if(value?.ensureActivities&&value?.updateActivity)stores.push(value);
-      walk(app?._container?._vnode||root._vnode,vnode=>{
-        const props=vnode.component?.props||vnode.props;
-        if(props?.activityStore)stores.push(props.activityStore);
-        if(props?.athlete?.id!=null)targets.push(props.athlete.id);
-      });
     }
-    const target=selected??current?.activity.icu_athlete_id??targets[0];
-    const choices=[...new Set(stores)].filter(s=>s.athlete?.icu_permission==='WRITE'&&Array.isArray(s.activities)&&typeof s.ensureActivities==='function'&&typeof s.updateActivity==='function'&&typeof s.refreshActivity==='function');
-    return target!=null?choices.find(s=>String(s.athlete.id)===String(target)):choices.length===1?choices[0]:null;
+    // Pinia normally holds the store; walk component props only as a fallback.
+    const direct=pick(selected??current?.activity.icu_athlete_id);
+    if(direct)return direct;
+    for(const root of roots)walk(root.__vue_app__?._container?._vnode||root._vnode,vnode=>{
+      const props=vnode.component?.props||vnode.props;
+      if(props?.activityStore)stores.push(props.activityStore);
+      if(props?.athlete?.id!=null)targets.push(props.athlete.id);
+    });
+    return pick(selected??current?.activity.icu_athlete_id??targets[0]);
   }
   function showBulkStatus(text,done=false){
     bulkStatus=text;
@@ -691,17 +712,25 @@ if(cc.onLibrary())return;
     notice.textContent=text;
   }
   function activitySignature(store){return store.activities.filter(isStrength).map(a=>a.id+':'+a.start_date).sort().join('|');}
+  const AUTO_SYNC_MS=30000,FULL_LOAD_MS=12*60*60*1000;let lastAutoSync=0;
   async function syncAllWorkouts(force=false){
     if(bulkBusy||!syncEnabled||!credentials?.scope)return;
+    // Automatic checks only need to notice newly loaded activities; don't rescan per mutation.
+    if(!force&&Date.now()-lastAutoSync<AUTO_SYNC_MS)return;
     const store=discoverSyncStore();if(!store)return;
+    if(!force)lastAutoSync=Date.now();
     const scope=credentials.scope,athlete=store.athlete,key=scope+':'+athlete.id,signature=activitySignature(store);
     if(!force&&bulkSeen.get(key)===signature)return;
-    bulkNoticeAllowed=force||!bulkNoticeShown.has(key);bulkNoticeShown.add(key);
+    // Loading every Intervals activity is the costly step. Each tab still checks the
+    // activities it has loaded; the full scan runs on demand or twice a day.
+    const fullKey=PREFIX+scope+':full-load:'+athlete.id,fullLoad=force||(!bulkLoaded.has(key)&&!(Date.now()-(get(fullKey)||0)<FULL_LOAD_MS));
+    // Quiet checks of already-synced activities show no notice.
+    bulkNoticeAllowed=force||(fullLoad&&!bulkNoticeShown.has(key));if(fullLoad)bulkNoticeShown.add(key);
     bulkBusy=true;bulkSeen.set(key,signature);
-    showBulkStatus('Liftosaur: checking all weight-training activities…');
+    showBulkStatus('Liftosaur: checking '+(fullLoad?'all':'loaded')+' weight-training activities…');
     try{
       await lock(PREFIX+key+':background',async()=>{
-        if(force||!bulkLoaded.has(key)){
+        if(fullLoad){
           await pageCall(store,'ensureActivities',['1980-01-01',new Date(Date.now()+86400000).toISOString().slice(0,10)],'Loading Intervals history');bulkLoaded.add(key);
         }
         if(force)await historyCache(scope,{force:true});
@@ -711,6 +740,8 @@ if(cc.onLibrary())return;
         bulkSeen.set(key,activitySignature(store));
         const text='Liftosaur: '+counts.matched+' matched · '+counts.written+' updated · '+counts.unmatched+' without a workout within 2h'+(counts.failed?' · '+counts.failed+' failed: '+counts.lastError:'')+(counts.pending?' · '+counts.pending+' pending; retry from Settings':'');
         set(PREFIX+scope+':background:'+athlete.id,{...counts,finishedAt:Date.now(),status:text});showBulkStatus(text,true);
+        // Only a clean pass over the fully loaded history lets other tabs skip the full load.
+        if(bulkLoaded.has(key)&&!counts.failed&&!counts.pending)set(fullKey,Date.now());
         if(!counts.failed&&!counts.pending&&counts.written>0)cc.record('intervals',{id:athlete.id,label:athlete.name,role:'selected athlete'},'success','Background native fields verified');
         viewResults.clear();attempts.clear();result=null;
       });
@@ -882,13 +913,19 @@ if(cc.onLibrary())return;
     customTab.className='v-btn v-theme--dark v-btn--density-default v-btn--size-default v-btn--variant-text v-tab';
     const label=el('span','Liftosaur','v-btn__content'),slider=el('div',null,'v-tab__slider');label.append(slider);
     customTab.replaceChildren(el('span',null,'v-btn__overlay'),el('span',null,'v-btn__underlay'),label);
-    const add=container.querySelector('button[title="Add Tab"]');container.insertBefore(customTab,add||null);alignTab();
+    const add=container.querySelector('button[title="Add Tab"]');container.insertBefore(customTab,add||null);alignedKey='';alignTab();
     customTab.addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const tabs=[...container.querySelectorAll('[role="tab"]')];const i=tabs.indexOf(customTab);tabs[(i+(event.key==='ArrowLeft'?-1:1)+tabs.length)%tabs.length]?.focus();}});
     panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby','lft-tab');
     content.after(panel);applyTabState();return true;
   }
+  let alignedKey='';
   function alignTab(){
     const ref=tabContainer?.querySelector('[role="tab"]:not(#lft-tab)');if(!ref||!customTab)return;
+    // Computed styles and the class toggle below force a style recalculation; only
+    // resample when the tab, selection or theme classes changed.
+    const selectedTab=tabContainer.querySelector('[role="tab"].v-tab--selected:not(#lft-tab)');
+    const key=ref.className+'|'+(selectedTab?[...tabContainer.children].indexOf(selectedTab)+selectedTab.className:'');
+    if(key===alignedKey)return;alignedKey=key;
     const computed=getComputedStyle(ref);
     for(const property of ['height','minHeight','minWidth','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','paddingTop','paddingRight','paddingBottom','paddingLeft'])if(customTab.style[property]!==computed[property])customTab.style[property]=computed[property];
     // Sample the app's actual active/inactive colors without our overlay rule.
@@ -902,10 +939,6 @@ if(cc.onLibrary())return;
       if(slider)customTab.style.setProperty('--lft-slider-height',getComputedStyle(slider).height);
     }finally{if(active)tabBar.classList.add('lft-custom-active');}
   }
-  function clearLegacyCalendarVolumes() {
-    document.querySelectorAll('.lft-calendar-volume').forEach(node=>node.remove());
-    document.querySelectorAll('.lft-calendar-metrics').forEach(node=>node.classList.remove('lft-calendar-metrics'));
-  }
   async function load(force=false) {
     if(!current||!credentials?.key||busy)return;
     const id=identity();
@@ -913,7 +946,8 @@ if(cc.onLibrary())return;
       if(result)return;
       try{
         const saved=cache.peek(credentials.scope,current.activity);
-        if(saved){result=saved;error='';viewResults.set(id,saved);render();return;}
+        // A stale "no workout" stays visible while one recheck runs below.
+        if(saved){result=saved;error='';viewResults.set(id,saved);render();if(!cache.stale(saved,current.activity))return;}
       }catch(e){error='Reading saved workout: '+(e.message||String(e));render();return;}
     }
     // Visible details must not wait for the all-activities scan. Cache activity
@@ -925,7 +959,7 @@ if(cc.onLibrary())return;
     finally {if(token===generation){busy=false;render();}else schedule();}
   }
   function refreshPage() {
-    queued=false;style();const ccAthlete=cc.intervals(page);cc.observe('intervals',ccAthlete);clearLegacyCalendarVolumes();const found=discover();syncAllWorkouts(false);
+    queued=false;style();const ccAthlete=cc.intervals(page);cc.observe('intervals',ccAthlete);const found=discover();syncAllWorkouts(false);
     if(!found||!strength(found.activity)) {
       if(current){generation++;current=null;result=null;error='';busy=false;lastIdentity='';cleanupTab();panel?.remove();panel=null;activePath='';}
       return;
@@ -951,7 +985,7 @@ if(cc.onLibrary())return;
   document.addEventListener('click',releaseToNativeTab,true);
   document.addEventListener('keydown',releaseToNativeTab,true);
   new MutationObserver(records=>{
-    if(records.some(r=>!r.target.closest?.('#lft-panel,#lft-background-status,.lft-calendar-volume') && [...r.addedNodes,...r.removedNodes].some(n=>n.id!=='lft-panel'&&n.id!=='lft-style'&&n.id!=='lft-tab'&&n.id!=='lft-background-status'&&!n.classList?.contains('lft-calendar-volume'))))schedule();
+    if(records.some(r=>!r.target.closest?.('#lft-panel,#lft-background-status') && [...r.addedNodes,...r.removedNodes].some(n=>n.id!=='lft-panel'&&n.id!=='lft-style'&&n.id!=='lft-tab'&&n.id!=='lft-background-status')))schedule();
   }).observe(document.body,{childList:true,subtree:true});
   window.addEventListener('popstate',schedule);window.addEventListener('hashchange',()=>{tabActive=location.hash==='#liftosaur';applyTabState();});setInterval(()=>{if(!document.hidden)schedule();},2000);
   GM_registerMenuCommand('Liftosaur settings',()=>{settingsOpen=true;if(panel){activateTab(true);render();panel.scrollIntoView({block:'center'});}else alert('Open a completed strength activity to configure Liftosaur.');});

@@ -1,4 +1,10 @@
 {
+  "0.8.0": [
+    "Uses much less CPU on Intervals pages: the script no longer scans the whole page structure on every change, and background checks run at most every 30 seconds.",
+    "New tabs no longer load your entire Intervals history each time. The full scan runs at most twice a day, or when you choose Refresh and sync all.",
+    "Activities that are already synced are skipped without cross-tab locking or storage rewrites.",
+    "\"No Liftosaur workout found\" is no longer permanent: an open activity rechecks Liftosaur every 10 minutes until a day after it ended."
+  ],
   "0.7.9": [
     "Updates now come from the new script library at piscuj.github.io/userscript-library. Install once from there; your settings are kept.",
     "Update all on the library page opens only the scripts that need an update."
