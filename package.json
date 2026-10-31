@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.*\"",
     "preview": "node build.mjs && node tools/preview.mjs",
     "retarget": "node tools/retarget.mjs"
   }
