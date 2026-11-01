@@ -39,17 +39,22 @@ function weekBalance(days, activities, currentDay) {
 // Intervals passes Luxon DateTime objects; the script reads them via toISODate().
 const day = (date, kcalConsumed) => ({ date: { toISODate: () => date }, wellness: { kcalConsumed } });
 
-test('weekly balance leaves out today, whose training may not be logged yet', () => {
-  // Monday: 2700 in, 300 out → +200. Tuesday: 2600 in, 0 out → +400. Wednesday (today): 3000 in, nothing burned yet.
+test('weekly balance averages every logged day of the week, including today', () => {
+  // Monday: 2700 in, 300 out → +200. Tuesday: 2600 in, 0 out → +400. Wednesday (today): 3000 in, 0 out → +800.
   const days = [day('2026-10-26', 2700), day('2026-10-27', 2600), day('2026-10-28', 3000)];
   const activities = [{ id: 1, start_date_local: '2026-10-26T07:00:00', calories: 300 }];
   const summary = weekBalance(days, activities, '2026-10-28');
-  assert.equal(summary.count, 2);
-  assert.equal(summary.value, 300);
+  assert.equal(summary.count, 3);
+  assert.equal(summary.value, 1400 / 3);
 });
 
-test('weekly balance is empty when only today is logged', () => {
-  assert.equal(weekBalance([day('2026-10-28', 3000)], [], '2026-10-28'), null);
+test('weekly balance counts today when it is the only logged day', () => {
+  assert.deepEqual({ ...weekBalance([day('2026-10-28', 3000)], [], '2026-10-28') }, { value: 800, count: 1 });
+});
+
+test('weekly balance leaves out future days', () => {
+  const days = [day('2026-10-28', 3000), day('2026-10-29', 2500)];
+  assert.equal(weekBalance(days, [], '2026-10-28').count, 1);
 });
 
 test('past weeks still average every logged day', () => {

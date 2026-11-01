@@ -1,4 +1,7 @@
 {
+  "0.4.5": [
+    "The current week’s average calorie balance includes today again: it averages every logged day of the week so far. Future days and days without intake are still left out."
+  ],
   "0.4.4": [
     "The current week’s average calorie balance leaves out today, since training calories are usually logged after the day’s intake. Weekly macro averages are unchanged."
   ],
