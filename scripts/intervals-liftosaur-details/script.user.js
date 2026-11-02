@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Intervals.icu Liftosaur Details
 // @namespace    piscuj.intervals.liftosaur-details
-// @version      0.8.1
+// @version      0.8.2
 // @description  Liftosaur sets in Intervals.icu with workout volume and volume-weighted RPE sync.
 // @match        https://intervals.icu/*
 // @match        https://www.intervals.icu/*
@@ -228,14 +228,14 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-liftosaur-details","version":"0.8.1","old":"0.6.0","services":["intervals","liftosaur"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-liftosaur-details","version":"0.8.2","old":"0.6.0","services":["intervals","liftosaur"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
   // Tampermonkey may expose the page's global Promise in Firefox. Async
   // functions still use this script's intrinsic constructor; keep them aligned.
   const Promise=(async()=>{})().constructor;
-  const VERSION = '0.8.1', PREFIX = 'liftosaur:v1:';
+  const VERSION = '0.8.2', PREFIX = 'liftosaur:v1:';
   function formatSet(set){return String(set?.raw||'Not completed').replace(/^1x/,'').replace(/^(\d+(?:[|\-]\d+)?\+?)\s+([+-]?\d+(?:\.\d+)?(?:kg|lb)\+?)/,'$1x$2');}
   // Liftosaur Weight_getOneRepMax / Weight_rpeMultiplier and History_maxSetBy:
   // https://github.com/astashov/liftosaur/blob/master/src/models/weight.ts
@@ -611,7 +611,15 @@ if(cc.onLibrary())return;
     if((activity.athlete?.icu_permission??store.athlete?.icu_permission)!=='WRITE')return {error:'Native sync requires write access to this athlete.'};
     return {store};
   }
-  const core={nativeBridge,splitSections,parseRecord,rankRecords,automaticMatch,queryWindow,createCache,createHistoryCache,backfillActivities,createBrowserLockStore,createLeaseLock,pageCall,nativeTabForEvent,parseSets,compareSet,volume,exerciseStats,workoutVolume,formatVolume,workoutTime,formatSet,estimate1RM,liftHighlights,weightedRPE,nativeValues,nativePatch,createNativeSync};
+  // Firefox blocks page code from reading objects owned by the userscript, so axios fails
+  // on a script-built patch. The page's own JSON.parse builds it in the page realm.
+  function nativeWriter(store,pageWindow){
+    return {
+      update:(a,p)=>pageCall(store,'updateActivity',[a.id,pageWindow.JSON.parse(JSON.stringify(p))],'Saving native fields'),
+      refresh:a=>pageCall(store,'refreshActivity',[a],'Verifying native fields')
+    };
+  }
+  const core={nativeBridge,nativeWriter,splitSections,parseRecord,rankRecords,automaticMatch,queryWindow,createCache,createHistoryCache,backfillActivities,createBrowserLockStore,createLeaseLock,pageCall,nativeTabForEvent,parseSets,compareSet,volume,exerciseStats,workoutVolume,formatVolume,workoutTime,formatSet,estimate1RM,liftHighlights,weightedRPE,nativeValues,nativePatch,createNativeSync};
   if(typeof module==='object' && module.exports) {module.exports=core;return;}
   if(typeof document==='undefined') return;
 
@@ -745,7 +753,7 @@ if(cc.onLibrary())return;
           await pageCall(store,'ensureActivities',['1980-01-01',new Date(Date.now()+86400000).toISOString().slice(0,10)],'Loading Intervals history');bulkLoaded.add(key);
         }
         if(force)await historyCache(scope,{force:true});
-        const run=createNativeSync({get,set,lock,update:(a,p)=>pageCall(store,'updateActivity',[a.id,p],'Saving native fields'),refresh:a=>pageCall(store,'refreshActivity',[a],'Verifying native fields')});
+        const run=createNativeSync({get,set,lock,...nativeWriter(store,page)});
         const counts=await backfillActivities({scope,athlete,store,history:historyCache,cache,sync:run,enabled:()=>syncEnabled&&credentials?.scope===scope,
           progress:c=>showBulkStatus('Liftosaur: '+c.processed+'/'+c.total+' checked · '+c.matched+' matched'+(c.failed?' · '+c.failed+' failed':''))});
         bulkSeen.set(key,activitySignature(store));
@@ -886,7 +894,7 @@ if(cc.onLibrary())return;
     if(!bridge.error||!/unavailable/.test(bridge.error))syncAttempts.add(attempt);
     if(bridge.error){if(syncStatus!==bridge.error){syncStatus=bridge.error;syncFailed=true;render();}return;}
     syncBusy=true;syncFailed=false;syncStatus='Saving native fields...';if(settingsOpen)render();
-    const run=createNativeSync({get,set,lock,update:(a,p)=>pageCall(bridge.store,'updateActivity',[a.id,p],'Saving native fields'),refresh:a=>pageCall(bridge.store,'refreshActivity',[a],'Verifying native fields')});
+    const run=createNativeSync({get,set,lock,...nativeWriter(bridge.store,page)});
     try{const saved=await run(scope,context.activity,selected,force);if(identity()===id){syncStatus=saved.status;if(saved.patch)cc.record('intervals',{id:context.activity.icu_athlete_id,label:context.activity.athlete?.name,role:'selected athlete'},'success','Native fields saved and verified');}}
     catch(e){if(identity()===id){syncStatus='Native sync failed: '+(e.message||'Check your connection and use Fill native fields now to retry.');syncFailed=true;}}
     finally{syncBusy=false;if(identity()===id)render();else schedule();}

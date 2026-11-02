@@ -1,4 +1,8 @@
 {
+  "0.8.2": [
+    "Fixes \"Permission denied\" when saving Weight Lifted and RPE in Firefox. The saved values are now built inside the Intervals page.",
+    "The next background pass fills blank Weight Lifted and RPE on older matched activities. Different values you entered yourself are kept."
+  ],
   "0.8.1": [
     "Fixes Weight Lifted and RPE not being filled for the activity you have open. Intervals passes its activity store to a child component, so the script now falls back to the athlete's shared activity store.",
     "If filling Weight Lifted or RPE fails, the reason now shows on the Liftosaur panel instead of only in Settings.",
