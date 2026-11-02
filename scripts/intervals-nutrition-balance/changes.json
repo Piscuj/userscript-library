@@ -1,4 +1,8 @@
 {
+  "0.5.0": [
+    "Each week now shows how much the 14-day average weight changed over 7 days.",
+    "Next to it, the change predicted from net calories at 7,700 kcal/kg, so you can compare the two. Hover for the details and the difference."
+  ],
   "0.4.5": [
     "The current week’s average calorie balance includes today again: it averages every logged day of the week so far. Future days and days without intake are still left out."
   ],

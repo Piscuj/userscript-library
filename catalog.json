@@ -29,11 +29,13 @@
     {
       "id": "intervals-nutrition-balance",
       "title": "Nutrition Balance",
-      "summary": "Show daily calorie balance and weekly calorie and macro averages in the Intervals.icu calendar.",
+      "summary": "Show daily calorie balance, weekly calorie and macro averages, and real versus predicted weight change in the Intervals.icu calendar.",
       "tags": ["Intervals.icu", "Nutrition"],
       "instructions": [
         "Daily balance is intake minus 2,200 base kcal and recorded activity calories.",
         "Weekly averages exclude missing values and future days. Explicit zero values are included.",
+        "14d is the change in 14-day average weight over 7 days, up to the week's end or today. It needs 8 readings in each 14-day window.",
+        "vs kcal is the change predicted from net calories at 7,700 kcal/kg, delayed the same way as the average. It needs 14 of the last 20 days logged.",
         "The script reads the loaded calendar without editing your records."
       ]
     },

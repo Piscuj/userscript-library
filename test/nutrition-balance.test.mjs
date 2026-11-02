@@ -61,3 +61,95 @@ test('past weeks still average every logged day', () => {
   const days = [day('2026-10-19', 2400), day('2026-10-25', 2000)];
   assert.equal(weekBalance(days, [], '2026-10-28').count, 2);
 });
+
+function run(expression, vars) {
+  const context = vm.createContext({ document: {}, ...vars });
+  vm.runInContext(helpers + `\nresult = ${expression};`, context);
+  return JSON.parse(JSON.stringify(context.result ?? null));
+}
+function addDays(date, count) {
+  const value = new Date(date + 'T12:00:00Z');
+  value.setUTCDate(value.getUTCDate() + count);
+  return value.toISOString().slice(0, 10);
+}
+// Daily wellness records ending on `end`, oldest first; `make(daysAgo)` returns each record's fields.
+const history = (end, length, make) => Array.from({ length }, (_, i) => ({ id: addDays(end, i - length + 1), ...make(length - 1 - i) }));
+const weekOf = sunday => Array.from({ length: 7 }, (_, i) => ({ date: { toISODate: () => addDays(sunday, i - 6) } }));
+const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} is not ${expected}`);
+
+test('weight change compares the 14-day average at week end with 7 days earlier', () => {
+  // Losing 0.1 kg/day: the average falls exactly 0.7 kg in 7 days.
+  const records = history('2026-10-25', 21, ago => ({ weight: 80 + ago * 0.1 }));
+  const change = run('weekWeightChange(days, records, currentDay)', { days: weekOf('2026-10-25'), records, currentDay: '2026-11-02' });
+  close(change.value, -0.7);
+  assert.equal(change.end, '2026-10-25');
+  assert.equal(change.count, 14);
+  assert.equal(change.previousCount, 14);
+});
+
+test('the current week measures up to today, not its future days', () => {
+  const records = history('2026-11-04', 21, ago => ({ weight: 80 + ago * 0.1 }));
+  const change = run('weekWeightChange(days, records, currentDay)', { days: weekOf('2026-11-08'), records, currentDay: '2026-11-04' });
+  assert.equal(change.end, '2026-11-04');
+  close(change.value, -0.7);
+});
+
+test('a future week has no weight change', () => {
+  const records = history('2026-11-02', 21, () => ({ weight: 80 }));
+  assert.equal(run('weekWeightChange(days, records, currentDay)', { days: weekOf('2026-11-15'), records, currentDay: '2026-11-02' }), null);
+});
+
+test('weight change needs 8 readings in both 14-day windows', () => {
+  const end = '2026-10-25';
+  const enough = history(end, 21, ago => (ago % 14 < 8 ? { weight: 80 } : {}));
+  assert.equal(run('weekWeightChange(days, records, currentDay)', { days: weekOf(end), records: enough, currentDay: end }).count, 8);
+  const sparse = history(end, 21, ago => (ago < 7 ? { weight: 80 } : { weight: null }));
+  assert.equal(run('weekWeightChange(days, records, currentDay)', { days: weekOf(end), records: sparse, currentDay: end }), null);
+});
+
+test('temporary and non-positive weights are not readings', () => {
+  const end = '2026-10-25';
+  const records = history(end, 21, ago => ({ weight: ago === 0 ? 99 : ago === 1 ? 0 : 80, tempWeight: ago === 0 }));
+  const change = run('weekWeightChange(days, records, currentDay)', { days: weekOf(end), records, currentDay: end });
+  assert.equal(change.count, 12);
+  close(change.value, 0);
+});
+
+test('a steady balance predicts 7 days of net calories at 7700 kcal/kg', () => {
+  const end = '2026-10-25';
+  const records = history(end, 21, () => ({ kcalConsumed: 1650 })); // 550 kcal/day below the 2200 base
+  const expected = run('expectedWeightChange(records, calorieMap([]), end, end)', { records, end });
+  close(expected.value, -0.5);
+  assert.equal(expected.count, 20);
+});
+
+test('prediction weights calories the way the 14-day average delays them', () => {
+  // A surplus 10 days ago is fully inside the change; one 19 days ago has mostly left it, and today has barely entered.
+  const end = '2026-10-25';
+  const surplusOn = daysAgo => history(end, 20, ago => ({ kcalConsumed: ago === daysAgo ? 2200 + 7700 : 2200 }));
+  const predict = daysAgo => run('expectedWeightChange(records, calorieMap([]), end, end)', { records: surplusOn(daysAgo), end }).value;
+  close(predict(10), 0.5);
+  close(predict(19), 1 / 14);
+  close(predict(0), 1 / 14);
+});
+
+test('prediction counts activity calories and fills a few unlogged days with the average', () => {
+  const end = '2026-10-25';
+  const records = history(end, 20, ago => (ago < 4 ? {} : { kcalConsumed: 3300 }));
+  const activities = history(end, 20, () => ({ calories: 550 })).map((row, i) => ({ id: i, start_date_local: row.id + 'T07:00:00', calories: row.calories }));
+  const expected = run('expectedWeightChange(records, calorieMap(activities), end, end)', { records, activities, end });
+  assert.equal(expected.count, 16);
+  close(expected.value, 0.5);
+});
+
+test('prediction needs at least 14 of the 20 days logged', () => {
+  const end = '2026-10-25';
+  const records = history(end, 20, ago => (ago < 7 ? {} : { kcalConsumed: 2200 }));
+  assert.equal(run('expectedWeightChange(records, calorieMap([]), end, end)', { records, end }), null);
+});
+
+test('kg values are signed to two decimals without a negative zero', () => {
+  assert.equal(run('formatKg(0.318)', {}), '+0.32 kg');
+  assert.equal(run('formatKg(-0.25)', {}), '−0.25 kg');
+  assert.equal(run('formatKg(-0.001)', {}), '0.00 kg');
+});
