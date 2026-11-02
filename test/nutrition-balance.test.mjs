@@ -11,20 +11,59 @@ const code = fs.readFileSync(path.join(root, 'scripts/intervals-nutrition-balanc
 // The feature's constants and helpers, without its start-up code.
 const helpers = code.slice(code.indexOf('  const BASE'), code.indexOf('  let ccLastRender'));
 
-function renderBadge(value, weekly) {
+function renderBadge(value, weekly, expected = null) {
   const attrs = new Map();
   const element = { style: {}, lastElementChild: { textContent: '' }, getAttribute: k => attrs.get(k), setAttribute: (k, v) => attrs.set(k, v) };
   const parent = { children: [], append: el => parent.children.push(el) };
   const native = { nativeColor: 'rgb(187, 146, 255)' };
   const calendar = { querySelector: () => ({ closest: () => native }), closest: () => null };
   const context = vm.createContext({ document: { createElement: () => element }, parent, calendar, getComputedStyle: el => ({ color: el.nativeColor }) });
-  vm.runInContext(helpers + `\nbadge(parent, ${value}, "Average", ${weekly}, "1", null, calendar);`, context);
+  vm.runInContext(helpers + `\nbadge(parent, ${value}, "Average", ${weekly}, "1", null, calendar, ${JSON.stringify(expected)});`, context);
   return element.lastElementChild.textContent;
 }
 
 test('weekly average balance shows plain kcal, without /day', () => {
   assert.equal(renderBadge(426, true), '+426 kcal');
   assert.match(renderBadge(-120, true), /^\D120 kcal$/);
+});
+
+test('predicted weight change follows the kcal balance in brackets', () => {
+  assert.equal(renderBadge(505, true, { value: 0.054 }), '+505 kcal (+0.05 kg)');
+  assert.match(renderBadge(-300, true, { value: -0.27 }), /^\D300 kcal \(\D0\.27 kg\)$/);
+});
+
+function renderWeight(value, theme = null) {
+  const element = { style: {}, lastElementChild: { textContent: '' }, attrs: {}, getAttribute(k) { return this.attrs[k]; }, setAttribute(k, v) { this.attrs[k] = v; } };
+  const parent = { children: [], append: el => parent.children.push(el) };
+  const calendar = { closest: selector => (theme === 'light' && selector.includes('light') ? {} : null), querySelector: () => null };
+  const change = { value, span: 7, end: '2026-11-01', previousEnd: '2026-10-25', average: 80, count: 14, previousAverage: 80.3, previousCount: 14 };
+  const context = vm.createContext({ document: { createElement: () => element }, parent, calendar, change });
+  vm.runInContext(helpers + '\nweightBadge(parent, change, {value: 0.36}, "1", null, calendar);\nbalance_color = balanceColor(calendar);', context);
+  return { element, balanceColor: context.balance_color };
+}
+
+test('weight shows an icon and the signed number, without a 14d label or the prediction', () => {
+  const { element } = renderWeight(-0.348);
+  assert.match(element.lastElementChild.textContent, /^\D0\.35 kg$/);
+  assert.match(element.innerHTML, /mdi-scale-bathroom/);
+  assert.match(element.title, /14-day average/);
+  assert.match(element.title, /Real minus predicted/);
+});
+
+test('weight colour differs from the calorie colour in both themes', () => {
+  for (const theme of ['dark', 'light']) {
+    const { element, balanceColor } = renderWeight(0.2, theme);
+    assert.ok(element.style.color);
+    assert.notEqual(element.style.color, balanceColor);
+  }
+});
+
+test('prediction does not need weigh-ins', () => {
+  const end = '2026-10-25';
+  const records = history(end, 20, () => ({ kcalConsumed: 2750 }));
+  const span = run('weekSpan(days, currentDay)', { days: weekOf(end), currentDay: end });
+  assert.deepEqual(span, { end, previousEnd: '2026-10-18', span: 7 });
+  close(run('expectedWeightChange(records, calorieMap([]), end, 7, end)', { records, end }).value, 0.5);
 });
 
 test('daily balance keeps its kcal label', () => {

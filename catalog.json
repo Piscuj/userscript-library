@@ -34,8 +34,8 @@
       "instructions": [
         "Daily balance is intake minus 2,200 base kcal and recorded activity calories.",
         "Weekly averages exclude missing values and future days. Explicit zero values are included.",
-        "14d is the change in 14-day average weight from the previous Sunday to the week's end, or to today in the current week. It needs 8 readings in each 14-day window.",
-        "vs kcal is the change predicted from net calories at 7,700 kcal/kg, delayed the same way as the average. It needs 70% of those days logged.",
+        "The scale-icon value is the change in 14-day average weight from the previous Sunday to the week's end, or to today in the current week. It needs 8 readings in each 14-day window.",
+        "The kg value in brackets after the calorie balance is the change predicted from net calories at 7,700 kcal/kg, delayed the same way as the average. It needs 70% of those days logged.",
         "The script reads the loaded calendar without editing your records."
       ]
     },

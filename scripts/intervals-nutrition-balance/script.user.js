@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Intervals.icu Nutrition Balance
 // @namespace piscuj.intervals.nutrition-balance
-// @version 0.5.1
+// @version 0.5.2
 // @description Weekly calorie balance and protein, fat and carb averages in the Intervals.icu calendar.
 // @match https://intervals.icu/*
 // @match https://www.intervals.icu/*
@@ -159,7 +159,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.1","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.2","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
@@ -172,6 +172,7 @@ if(cc.onLibrary())return;
     {key:'fatTotal',name:'Fat',color:'#ffbd45',lightColor:'#8a5700'},
     {key:'carbohydrates',name:'Carbs',color:'#22d3ee',lightColor:'#007386'}
   ];
+  const WEIGHT_COLOR = {dark:'rgb(212, 196, 120)',light:'#7a6a1f'};
   const number = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
   const localDate = d => d && typeof d.toISODate === 'function' ? d.toISODate() : null;
   const today = () => {
@@ -227,11 +228,16 @@ if(cc.onLibrary())return;
     return values.length >= MIN_WEIGHTS ? {value: values.reduce((sum,v) => sum+v,0)/values.length, count: values.length} : null;
   }
   // From the day before the week starts to its last day, or to today while the week is in progress.
-  function weekWeightChange(days, records, currentDay) {
+  function weekSpan(days, currentDay) {
     const dates = days.map(day => localDate(day.date)).filter(Boolean).sort();
     if (!dates.length || dates[0] > currentDay) return null;
     const end = dates.at(-1) < currentDay ? dates.at(-1) : currentDay, previousEnd = shiftDate(dates[0], -1);
-    const span = Math.round((Date.parse(end)-Date.parse(previousEnd))/86400000);
+    return {end, previousEnd, span: Math.round((Date.parse(end)-Date.parse(previousEnd))/86400000)};
+  }
+  function weekWeightChange(days, records, currentDay) {
+    const period = weekSpan(days, currentDay);
+    if (!period) return null;
+    const {end, previousEnd, span} = period;
     const now = averageWeight(records, end), previous = averageWeight(records, previousEnd);
     return now && previous ? {value: now.value-previous.value, end, previousEnd, span, average: now.value, count: now.count, previousAverage: previous.value, previousCount: previous.count} : null;
   }
@@ -304,7 +310,7 @@ if(cc.onLibrary())return;
     if (document.getElementById(STYLE)) return;
     const style = document.createElement('style');
     style.id = STYLE;
-    style.textContent = `.${CLASS},.icu-week-macros{display:inline-flex;align-items:center;gap:4px;font-size:inherit;line-height:inherit;font-weight:inherit;vertical-align:middle;margin:0 6px;font-variant-numeric:tabular-nums}.${CLASS}{white-space:nowrap}.${CLASS} i{font-size:1.15em;font-style:normal}.icu-week-macros{gap:0;flex-wrap:nowrap;white-space:nowrap}.icu-week-macros>span{white-space:nowrap}.${WEIGHT}{display:flex;flex-wrap:wrap;column-gap:4px;margin:0 6px;font-variant-numeric:tabular-nums}.${WEIGHT}>span{white-space:nowrap}`;
+    style.textContent = `.${CLASS},.${WEIGHT},.icu-week-macros{display:inline-flex;align-items:center;gap:4px;font-size:inherit;line-height:inherit;font-weight:inherit;vertical-align:middle;margin:0 6px;font-variant-numeric:tabular-nums}.${CLASS},.${WEIGHT}{white-space:nowrap}.${CLASS} i,.${WEIGHT} i{font-size:1.15em;font-style:normal}.icu-week-macros{gap:0;flex-wrap:nowrap;white-space:nowrap}.icu-week-macros>span{white-space:nowrap}`;
     document.head.append(style);
   }
   function typography(el,reference) {
@@ -317,7 +323,7 @@ if(cc.onLibrary())return;
     const light=!!calendarEl?.closest('.v-theme--light');
     return native?getComputedStyle(native).color:(light?'#7c3aed':'#bb92ff');
   }
-  function badge(parent, value, title, weekly, keep, reference=null, calendarEl=null) {
+  function badge(parent, value, title, weekly, keep, reference=null, calendarEl=null, expected=null) {
     let el = [...parent.children].find(node => node.classList.contains(CLASS));
     if (!el) {
       el = document.createElement('span');
@@ -329,7 +335,7 @@ if(cc.onLibrary())return;
     typography(el,reference);
     const color=balanceColor(calendarEl);
     if(el.style.color!==color)el.style.color=color;
-    const text = `${format(value)} kcal`;
+    const text = `${format(value)} kcal` + (expected ? ` (${formatKg(expected.value)})` : '');
     const label = `${weekly ? 'Average daily calorie balance' : 'Calorie balance'}: ${text}`;
     if (el.lastElementChild.textContent !== text) el.lastElementChild.textContent = text;
     if (el.title !== title) el.title = title;
@@ -363,15 +369,14 @@ if(cc.onLibrary())return;
   function weightBadge(parent,change,expected,keep,reference,calendarEl) {
     if(!change)return;
     let el=[...parent.children].find(node=>node.classList.contains(WEIGHT));
-    if(!el){el=document.createElement('span');el.className=WEIGHT;el.innerHTML='<span></span><span></span>';parent.append(el);}
+    if(!el){el=document.createElement('span');el.className=WEIGHT;el.innerHTML='<i class="mdi mdi-scale-bathroom" aria-hidden="true"></i><span></span>';parent.append(el);}
     typography(el,reference);
-    const color=balanceColor(calendarEl);
+    const color=calendarEl?.closest('.v-theme--light')?WEIGHT_COLOR.light:WEIGHT_COLOR.dark;
     if(el.style.color!==color)el.style.color=color;
-    const real='14d '+formatKg(change.value), predicted=expected?'vs kcal '+formatKg(expected.value):'';
-    if(el.firstElementChild.textContent!==real)el.firstElementChild.textContent=real;
-    if(el.lastElementChild.textContent!==predicted)el.lastElementChild.textContent=predicted;
+    const text=formatKg(change.value);
+    if(el.lastElementChild.textContent!==text)el.lastElementChild.textContent=text;
     const title=`14-day average weight: ${change.average.toFixed(2)} kg on ${change.end} (${change.count} readings), ${change.previousAverage.toFixed(2)} kg on ${change.previousEnd} (${change.previousCount} readings). Change over ${change.span} ${change.span===1?'day':'days'}: ${formatKg(change.value)}.`+
-      (expected?` Net calories predict ${formatKg(expected.value)}: intake − (${BASE} + active kcal) over the last ${expected.days} days at ${KCAL_PER_KG} kcal/kg, weighted by how the 14-day average delays them. ${expected.count} of ${expected.days} days logged; gaps use their average. Real minus predicted: ${formatKg(change.value-expected.value)}.`:` Net calories prediction needs ${MIN_LOGGED_SHARE*100}% of the last ${AVERAGE_DAYS-1+change.span} days logged.`);
+      (expected?` Predicted from net calories: ${formatKg(expected.value)}. Real minus predicted: ${formatKg(change.value-expected.value)}.`:'');
     if(el.title!==title){el.title=title;el.setAttribute('aria-label',title);}
     keepNode(keep,el);
   }
@@ -407,10 +412,11 @@ if(cc.onLibrary())return;
         const summary = weekBalance(days,active,currentDay);
         if (header) {
           const reference=header.querySelector('.summary-grid, .data');
-          if(summary) badge(header,summary.value,`Average daily calorie balance: ${format(summary.value)} kcal/day across ${summary.count} logged ${summary.count === 1 ? 'day' : 'days'}. Intake \u2212 (${BASE} + active kcal). Includes today when logged; missing intake and future days are excluded.`,true,keep,reference,calendarElement);
+          const period=weekSpan(days,currentDay), expected=period&&expectedWeightChange(records,active,period.end,period.span,currentDay);
+          const predicted=expected?` Brackets: weight change predicted from net calories at ${KCAL_PER_KG} kcal/kg over the last ${expected.days} days, weighted by how the 14-day average delays them. ${expected.count} of ${expected.days} days logged; gaps use their average.`:'';
+          if(summary) badge(header,summary.value,`Average daily calorie balance: ${format(summary.value)} kcal/day across ${summary.count} logged ${summary.count === 1 ? 'day' : 'days'}. Intake \u2212 (${BASE} + active kcal). Includes today when logged; missing intake and future days are excluded.${predicted}`,true,keep,reference,calendarElement,expected);
           macroBadges(header,weekMacros(days,currentDay),keep,reference,calendarElement);
-          const change=weekWeightChange(days,records,currentDay);
-          weightBadge(header,change,change&&expectedWeightChange(records,active,change.end,change.span,currentDay),keep,reference,calendarElement);
+          weightBadge(header,weekWeightChange(days,records,currentDay),expected,keep,reference,calendarElement);
         }
       }
     }
