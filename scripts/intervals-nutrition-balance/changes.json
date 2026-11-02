@@ -1,4 +1,7 @@
 {
+  "0.5.3": [
+    "Every week now shows its values in the same order: calorie balance, macros, then weight change."
+  ],
   "0.5.2": [
     "The weight change predicted from calories now sits in brackets after the weekly calorie balance, for example +505 kcal (+0.05 kg).",
     "The real weight change shows on its own with a scale icon and in the calendar’s weight colour."

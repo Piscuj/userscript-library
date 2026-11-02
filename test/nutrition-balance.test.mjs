@@ -225,3 +225,36 @@ test('kg values are signed to two decimals without a negative zero', () => {
   assert.equal(run('formatKg(-0.25)', {}), '−0.25 kg');
   assert.equal(run('formatKg(-0.001)', {}), '0.00 kg');
 });
+
+function badgeRow(order) {
+  const parent = { children: [], moves: 0 };
+  parent.children = order.map(name => ({
+    name,
+    classList: { contains: value => value === name },
+    get previousElementSibling() { return parent.children[parent.children.indexOf(this) - 1] ?? null; },
+    insertAdjacentElement(position, node) {
+      assert.equal(position, 'afterend');
+      parent.moves++;
+      parent.children.splice(parent.children.indexOf(node), 1);
+      parent.children.splice(parent.children.indexOf(this) + 1, 0, node);
+    },
+  }));
+  vm.runInContext(helpers + '\norderBadges(parent);', vm.createContext({ document: {}, parent }));
+  return parent;
+}
+const KCAL = 'icu-calorie-balance', MACROS = 'icu-week-macros', WEIGHT = 'icu-week-weight';
+
+test('badges keep the kcal, macros, weight order whichever was created first', () => {
+  for (const order of [[WEIGHT, KCAL, MACROS], [MACROS, WEIGHT, KCAL], [KCAL, WEIGHT, MACROS]]) {
+    assert.deepEqual(badgeRow(['native', ...order]).children.map(el => el.name).slice(1), [KCAL, MACROS, WEIGHT]);
+  }
+});
+
+test('badges already in order are not moved, so refreshes cause no page changes', () => {
+  assert.equal(badgeRow(['native', KCAL, MACROS, WEIGHT]).moves, 0);
+  assert.equal(badgeRow(['native', MACROS, WEIGHT]).moves, 0);
+});
+
+test('native summary elements stay ahead of the badges', () => {
+  assert.equal(badgeRow(['native', WEIGHT, KCAL, MACROS]).children[0].name, 'native');
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Intervals.icu Nutrition Balance
 // @namespace piscuj.intervals.nutrition-balance
-// @version 0.5.2
+// @version 0.5.3
 // @description Weekly calorie balance and protein, fat and carb averages in the Intervals.icu calendar.
 // @match https://intervals.icu/*
 // @match https://www.intervals.icu/*
@@ -159,7 +159,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.2","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.3","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
@@ -342,6 +342,11 @@ if(cc.onLibrary())return;
     if (el.getAttribute('aria-label') !== label) el.setAttribute('aria-label',label);
     keepNode(keep,el);
   }
+  // A badge appears once its data is ready, so creation order varies between weeks and refreshes.
+  function orderBadges(parent) {
+    const badges=[CLASS,'icu-week-macros',WEIGHT].map(name=>[...parent.children].find(node=>node.classList.contains(name))).filter(Boolean);
+    for(let i=1;i<badges.length;i++) if(badges[i].previousElementSibling!==badges[i-1]) badges[i-1].insertAdjacentElement('afterend',badges[i]);
+  }
   function macroBadges(parent,averages,keep,reference,calendarEl) {
     if (!averages.some(m=>m.value!==null)) return;
     let group=[...parent.children].find(node=>node.classList.contains('icu-week-macros'));
@@ -417,6 +422,7 @@ if(cc.onLibrary())return;
           if(summary) badge(header,summary.value,`Average daily calorie balance: ${format(summary.value)} kcal/day across ${summary.count} logged ${summary.count === 1 ? 'day' : 'days'}. Intake \u2212 (${BASE} + active kcal). Includes today when logged; missing intake and future days are excluded.${predicted}`,true,keep,reference,calendarElement,expected);
           macroBadges(header,weekMacros(days,currentDay),keep,reference,calendarElement);
           weightBadge(header,weekWeightChange(days,records,currentDay),expected,keep,reference,calendarElement);
+          orderBadges(header);
         }
       }
     }
