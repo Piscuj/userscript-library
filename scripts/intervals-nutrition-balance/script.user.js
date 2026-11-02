@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Intervals.icu Nutrition Balance
 // @namespace piscuj.intervals.nutrition-balance
-// @version 0.5.0
+// @version 0.5.1
 // @description Weekly calorie balance and protein, fat and carb averages in the Intervals.icu calendar.
 // @match https://intervals.icu/*
 // @match https://www.intervals.icu/*
@@ -159,14 +159,14 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.0","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.1","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
   const page=pageObject(typeof unsafeWindow==='object'?unsafeWindow:window);
   const document=window.document;
   const BASE = 2200, CLASS = 'icu-calorie-balance', STYLE = CLASS + '-style', WEIGHT = 'icu-week-weight';
-  const KCAL_PER_KG = 7700, AVERAGE_DAYS = 14, MIN_WEIGHTS = 8, BALANCE_DAYS = 20, MIN_BALANCES = 14;
+  const KCAL_PER_KG = 7700, AVERAGE_DAYS = 14, MIN_WEIGHTS = 8, MIN_LOGGED_SHARE = 0.7;
   const MACROS = [
     {key:'protein',name:'Protein',color:'#ff7078',lightColor:'#b42336'},
     {key:'fatTotal',name:'Fat',color:'#ffbd45',lightColor:'#8a5700'},
@@ -220,31 +220,34 @@ if(cc.onLibrary())return;
       return {...macro,count:values.length,value:values.length?values.reduce((sum,v)=>sum+v,0)/values.length:null};
     });
   }
+  // Firefox: a page array's own filter/map reject callbacks from this sandbox, so wellness records are looped over.
   function averageWeight(records, end) {
-    const start = shiftDate(end, 1-AVERAGE_DAYS);
-    const values = records.filter(r => r.id >= start && r.id <= end && number(r.weight) && r.weight > 0 && !r.tempWeight).map(r => r.weight);
+    const start = shiftDate(end, 1-AVERAGE_DAYS), values = [];
+    for (const r of records) if (r.id >= start && r.id <= end && number(r.weight) && r.weight > 0 && !r.tempWeight) values.push(r.weight);
     return values.length >= MIN_WEIGHTS ? {value: values.reduce((sum,v) => sum+v,0)/values.length, count: values.length} : null;
   }
-  // Measured to the week's last day, or to today while the week is in progress.
+  // From the day before the week starts to its last day, or to today while the week is in progress.
   function weekWeightChange(days, records, currentDay) {
     const dates = days.map(day => localDate(day.date)).filter(Boolean).sort();
     if (!dates.length || dates[0] > currentDay) return null;
-    const end = dates.at(-1) < currentDay ? dates.at(-1) : currentDay, previousEnd = shiftDate(end, -7);
+    const end = dates.at(-1) < currentDay ? dates.at(-1) : currentDay, previousEnd = shiftDate(dates[0], -1);
+    const span = Math.round((Date.parse(end)-Date.parse(previousEnd))/86400000);
     const now = averageWeight(records, end), previous = averageWeight(records, previousEnd);
-    return now && previous ? {value: now.value-previous.value, end, previousEnd, average: now.value, count: now.count, previousAverage: previous.value, previousCount: previous.count} : null;
+    return now && previous ? {value: now.value-previous.value, end, previousEnd, span, average: now.value, count: now.count, previousAverage: previous.value, previousCount: previous.count} : null;
   }
-  // A 7-day change in a 14-day average spreads each day's weight over 20 days, so calories get the same shares.
-  function expectedWeightChange(records, active, end, currentDay) {
-    const byDate = new Map(records.map(r => [r.id, r])), rows = [];
-    for (let ago = 0; ago < BALANCE_DAYS; ago++) {
+  // Over `span` days, a change in a 14-day average spreads each day's weight over 13+span days, so calories get the same shares.
+  function expectedWeightChange(records, active, end, span, currentDay) {
+    const byDate = new Map(), rows = [], days = AVERAGE_DAYS-1+span;
+    for (const r of records) byDate.set(r.id, r);
+    for (let ago = 0; ago < days; ago++) {
       const date = shiftDate(end, -ago);
       const row = balance({date: {toISODate: () => date}, wellness: byDate.get(date)}, active, currentDay);
-      rows.push({share: (Math.min(ago+1,AVERAGE_DAYS) - Math.max(ago-6,0))/AVERAGE_DAYS, value: row ? row.value : null});
+      rows.push({share: (Math.min(ago+1,AVERAGE_DAYS) - Math.max(ago-span+1,0))/AVERAGE_DAYS, value: row ? row.value : null});
     }
     const logged = rows.filter(row => row.value !== null);
-    if (logged.length < MIN_BALANCES) return null;
+    if (logged.length < Math.ceil(days*MIN_LOGGED_SHARE)) return null;
     const fill = logged.reduce((sum,row) => sum+row.value,0)/logged.length;
-    return {value: rows.reduce((sum,row) => sum+row.share*(row.value ?? fill),0)/KCAL_PER_KG, count: logged.length};
+    return {value: rows.reduce((sum,row) => sum+row.share*(row.value ?? fill),0)/KCAL_PER_KG, count: logged.length, days};
   }
   // Intervals' production Vue renderer keeps the root VNode on its app container.
   // Walk only the rendered tree, without changing any application state or data.
@@ -367,8 +370,8 @@ if(cc.onLibrary())return;
     const real='14d '+formatKg(change.value), predicted=expected?'vs kcal '+formatKg(expected.value):'';
     if(el.firstElementChild.textContent!==real)el.firstElementChild.textContent=real;
     if(el.lastElementChild.textContent!==predicted)el.lastElementChild.textContent=predicted;
-    const title=`14-day average weight: ${change.average.toFixed(2)} kg on ${change.end} (${change.count} readings), ${change.previousAverage.toFixed(2)} kg on ${change.previousEnd} (${change.previousCount} readings). Change over 7 days: ${formatKg(change.value)}.`+
-      (expected?` Net calories predict ${formatKg(expected.value)}: intake − (${BASE} + active kcal) over the last ${BALANCE_DAYS} days at ${KCAL_PER_KG} kcal/kg, weighted by how the 14-day average delays them. ${expected.count} of ${BALANCE_DAYS} days logged; gaps use their average. Real minus predicted: ${formatKg(change.value-expected.value)}.`:` Net calories prediction needs ${MIN_BALANCES} of the last ${BALANCE_DAYS} days logged.`);
+    const title=`14-day average weight: ${change.average.toFixed(2)} kg on ${change.end} (${change.count} readings), ${change.previousAverage.toFixed(2)} kg on ${change.previousEnd} (${change.previousCount} readings). Change over ${change.span} ${change.span===1?'day':'days'}: ${formatKg(change.value)}.`+
+      (expected?` Net calories predict ${formatKg(expected.value)}: intake − (${BASE} + active kcal) over the last ${expected.days} days at ${KCAL_PER_KG} kcal/kg, weighted by how the 14-day average delays them. ${expected.count} of ${expected.days} days logged; gaps use their average. Real minus predicted: ${formatKg(change.value-expected.value)}.`:` Net calories prediction needs ${MIN_LOGGED_SHARE*100}% of the last ${AVERAGE_DAYS-1+change.span} days logged.`);
     if(el.title!==title){el.title=title;el.setAttribute('aria-label',title);}
     keepNode(keep,el);
   }
@@ -407,7 +410,7 @@ if(cc.onLibrary())return;
           if(summary) badge(header,summary.value,`Average daily calorie balance: ${format(summary.value)} kcal/day across ${summary.count} logged ${summary.count === 1 ? 'day' : 'days'}. Intake \u2212 (${BASE} + active kcal). Includes today when logged; missing intake and future days are excluded.`,true,keep,reference,calendarElement);
           macroBadges(header,weekMacros(days,currentDay),keep,reference,calendarElement);
           const change=weekWeightChange(days,records,currentDay);
-          weightBadge(header,change,change&&expectedWeightChange(records,active,change.end,currentDay),keep,reference,calendarElement);
+          weightBadge(header,change,change&&expectedWeightChange(records,active,change.end,change.span,currentDay),keep,reference,calendarElement);
         }
       }
     }

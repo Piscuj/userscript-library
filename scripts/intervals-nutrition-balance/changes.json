@@ -1,4 +1,8 @@
 {
+  "0.5.1": [
+    "Weekly balance, macros and weight indicators show in Firefox again.",
+    "The current week’s weight change now measures from last Sunday’s 14-day average to today, instead of from 7 days ago. The calorie prediction covers the same days."
+  ],
   "0.5.0": [
     "Each week now shows how much the 14-day average weight changed over 7 days.",
     "Next to it, the change predicted from net calories at 7,700 kcal/kg, so you can compare the two. Hover for the details and the difference."
