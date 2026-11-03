@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const code = fs.readFileSync(path.join(root, 'scripts/intervals-nutrition-balance/script.user.js'), 'utf8');
-// The feature's constants and helpers, without its start-up code.
-const helpers = code.slice(code.indexOf('  const BASE'), code.indexOf('  let ccLastRender'));
+// The feature's constants and helpers, without its start-up code. Fixtures below assume a 2200 kcal base.
+const helpers = code.slice(code.indexOf('  const DEFAULT_BASE'), code.indexOf('  let ccLastRender')) + '\nbase = 2200;\n';
 
 function renderBadge(value, weekly, expected = null) {
   const attrs = new Map();
@@ -257,4 +257,58 @@ test('badges already in order are not moved, so refreshes cause no page changes'
 
 test('native summary elements stay ahead of the badges', () => {
   assert.equal(badgeRow(['native', WEIGHT, KCAL, MACROS]).children[0].name, 'native');
+});
+
+// The base is set by these tests themselves, not by the 2200 used in the fixtures above.
+function withStore(stored, code) {
+  const values = new Map(stored === undefined ? [] : [['base-kcal', stored]]);
+  const context = vm.createContext({
+    document: {},
+    GM_getValue: (key, fallback) => (values.has(key) ? values.get(key) : fallback),
+    GM_setValue: (key, value) => values.set(key, value),
+  });
+  vm.runInContext(helpers + `\nresult = (${code})();`, context);
+  return { result: context.result, saved: values.get('base-kcal') };
+}
+const applyStored = 'base = storedBase(); return ';
+
+test('the base defaults to 2400 kcal when nothing is stored', () => {
+  assert.equal(withStore(undefined, '() => storedBase()').result, 2400);
+});
+
+test('a stored base is used in the calorie balance', () => {
+  const code = `() => { ${applyStored} balance({date:{toISODate:()=>'2026-10-26'},wellness:{kcalConsumed:3000}}, new Map(), '2026-10-26').value; }`;
+  assert.equal(withStore(2500, code).result, 500);
+  assert.equal(withStore(undefined, code).result, 600);
+});
+
+test('an invalid stored base falls back to the default', () => {
+  for (const stored of ['abc', -5, 0, 100, 50000, 2400.5, null, {}]) {
+    assert.equal(withStore(stored, '() => storedBase()').result, 2400);
+  }
+});
+
+test('saving accepts whole calorie values and stores them as numbers', () => {
+  const { result, saved } = withStore(undefined, `() => saveBase(' 2650 ')`);
+  assert.equal(result, true);
+  assert.equal(saved, 2650);
+});
+
+test('saving an empty value restores the default', () => {
+  const { result, saved } = withStore(2650, `() => saveBase('  ')`);
+  assert.equal(result, true);
+  assert.equal(saved, 2400);
+});
+
+test('saving rejects invalid values and keeps the stored base', () => {
+  for (const input of ['abc', '-100', '2400.5', '100', '50000', '2 400']) {
+    const { result, saved } = withStore(2650, `() => saveBase(${JSON.stringify(input)})`);
+    assert.equal(result, false);
+    assert.equal(saved, 2650);
+  }
+});
+
+test('a saved base applies on the next refresh', () => {
+  const code = `() => { saveBase('2000'); ${applyStored} balance({date:{toISODate:()=>'2026-10-26'},wellness:{kcalConsumed:3000}}, new Map(), '2026-10-26').value; }`;
+  assert.equal(withStore(undefined, code).result, 1000);
 });

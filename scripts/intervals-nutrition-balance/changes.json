@@ -1,4 +1,8 @@
 {
+  "0.5.4": [
+    "The calorie base is now 2,400 kcal instead of 2,200, so balances and predicted weight change are lower.",
+    "You can change the base without editing the script: open the Tampermonkey menu on Intervals.icu and choose Set base calories. It is saved separately in each browser."
+  ],
   "0.5.3": [
     "Every week now shows its values in the same order: calorie balance, macros, then weight change."
   ],

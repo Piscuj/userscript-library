@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name Intervals.icu Nutrition Balance
 // @namespace piscuj.intervals.nutrition-balance
-// @version 0.5.3
+// @version 0.5.4
 // @description Weekly calorie balance and protein, fat and carb averages in the Intervals.icu calendar.
 // @match https://intervals.icu/*
 // @match https://www.intervals.icu/*
 // @grant GM_getValue
 // @grant GM_setValue
+// @grant GM_registerMenuCommand
 // @grant unsafeWindow
 // @run-at document-idle
 // @noframes
@@ -159,13 +160,13 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.3","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.4","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
   const page=pageObject(typeof unsafeWindow==='object'?unsafeWindow:window);
   const document=window.document;
-  const BASE = 2200, CLASS = 'icu-calorie-balance', STYLE = CLASS + '-style', WEIGHT = 'icu-week-weight';
+  const DEFAULT_BASE = 2400, MIN_BASE = 500, MAX_BASE = 10000, BASE_KEY = 'base-kcal', CLASS = 'icu-calorie-balance', STYLE = CLASS + '-style', WEIGHT = 'icu-week-weight';
   const KCAL_PER_KG = 7700, AVERAGE_DAYS = 14, MIN_WEIGHTS = 8, MIN_LOGGED_SHARE = 0.7;
   const MACROS = [
     {key:'protein',name:'Protein',color:'#ff7078',lightColor:'#b42336'},
@@ -173,6 +174,20 @@ if(cc.onLibrary())return;
     {key:'carbohydrates',name:'Carbs',color:'#22d3ee',lightColor:'#007386'}
   ];
   const WEIGHT_COLOR = {dark:'rgb(212, 196, 120)',light:'#7a6a1f'};
+  let base = DEFAULT_BASE;
+  const validBase = v => Number.isInteger(v) && v >= MIN_BASE && v <= MAX_BASE;
+  function storedBase() {
+    try {
+      const value = GM_getValue(BASE_KEY, DEFAULT_BASE);
+      return validBase(value) ? value : DEFAULT_BASE;
+    } catch { return DEFAULT_BASE; }
+  }
+  function saveBase(input) {
+    const text = String(input).trim(), value = text === '' ? DEFAULT_BASE : Number(text);
+    if (!validBase(value)) return false;
+    GM_setValue(BASE_KEY, value);
+    return true;
+  }
   const number = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
   const localDate = d => d && typeof d.toISODate === 'function' ? d.toISODate() : null;
   const today = () => {
@@ -208,7 +223,7 @@ if(cc.onLibrary())return;
     const date = localDate(day.date), intake = day.wellness?.kcalConsumed;
     if (!date || date > currentDay || !number(intake)) return null;
     const out = active.has(date) ? active.get(date) : 0;
-    return out === null ? null : {date, intake, out, value: intake - (BASE + out)};
+    return out === null ? null : {date, intake, out, value: intake - (base + out)};
   }
   function weekBalance(days, active, currentDay) {
     const rows = days.map(day => balance(day, active, currentDay)).filter(Boolean);
@@ -386,7 +401,7 @@ if(cc.onLibrary())return;
     keepNode(keep,el);
   }
   function refresh() {
-    mountStyle();ccCalendarReadable=false;
+    mountStyle();ccCalendarReadable=false;base=storedBase();
     const keep = String(++refreshId), currentDay = today(), calendars = [];
     const ccAccount=cc.intervals(page); cc.observe('intervals',ccAccount);
     for (const root of document.querySelectorAll('[data-v-app]')) {
@@ -419,7 +434,7 @@ if(cc.onLibrary())return;
           const reference=header.querySelector('.summary-grid, .data');
           const period=weekSpan(days,currentDay), expected=period&&expectedWeightChange(records,active,period.end,period.span,currentDay);
           const predicted=expected?` Brackets: weight change predicted from net calories at ${KCAL_PER_KG} kcal/kg over the last ${expected.days} days, weighted by how the 14-day average delays them. ${expected.count} of ${expected.days} days logged; gaps use their average.`:'';
-          if(summary) badge(header,summary.value,`Average daily calorie balance: ${format(summary.value)} kcal/day across ${summary.count} logged ${summary.count === 1 ? 'day' : 'days'}. Intake \u2212 (${BASE} + active kcal). Includes today when logged; missing intake and future days are excluded.${predicted}`,true,keep,reference,calendarElement,expected);
+          if(summary) badge(header,summary.value,`Average daily calorie balance: ${format(summary.value)} kcal/day across ${summary.count} logged ${summary.count === 1 ? 'day' : 'days'}. Intake \u2212 (${base} + active kcal). Includes today when logged; missing intake and future days are excluded. Change the ${base} kcal base in the Tampermonkey menu.${predicted}`,true,keep,reference,calendarElement,expected);
           macroBadges(header,weekMacros(days,currentDay),keep,reference,calendarElement);
           weightBadge(header,weekWeightChange(days,records,currentDay),expected,keep,reference,calendarElement);
           orderBadges(header);
@@ -442,6 +457,12 @@ if(cc.onLibrary())return;
       [...record.addedNodes,...record.removedNodes].some(node => !(node.nodeType === 1 && (node.classList.contains(CLASS) || node.classList.contains('icu-week-macros') || node.classList.contains(WEIGHT) || node.id === STYLE))))) schedule();
   });
   observer.observe(document.body,{subtree:true,childList:true,characterData:true});
+  if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('Set base calories',() => {
+    const input = window.prompt(`Base calories per day, before activity (${MIN_BASE}–${MAX_BASE}). Leave empty for ${DEFAULT_BASE}.`, String(base));
+    if (input === null) return;
+    if (saveBase(input)) refresh();
+    else window.alert(`Enter a whole number from ${MIN_BASE} to ${MAX_BASE}.`);
+  });
   refresh();
   // Also catches edits to data hidden by the calendar's display options and midnight.
   setInterval(() => {if (!document.hidden) schedule();},2000);
