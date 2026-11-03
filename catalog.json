@@ -50,6 +50,18 @@
         "Background sync fills native Weight Lifted and RPE for historical workouts, preserving different manual values.",
         "The initial sync notice dismisses after two seconds and stays quiet on later automatic view changes. Full sync status remains in Settings. An explicit Refresh all can show another brief notice."
       ]
+    },
+    {
+      "id": "youtube-watch-later-sort",
+      "title": "YouTube Watch Later Sort",
+      "summary": "Sort your YouTube Watch Later playlist from shortest to longest video and save the order.",
+      "tags": ["YouTube"],
+      "instructions": [
+        "Open Watch Later while signed in and use Sort by length at the bottom right. Confirm after checking the number of moves.",
+        "The new order is saved to your account and replaces the old one, which can't be restored. Videos without a length, such as live streams, go last.",
+        "New videos join the list wherever YouTube puts them. Sort again to place them. If a sort is stopped or fails, sorting again finishes the job.",
+        "The script uses YouTube's private interface with your signed-in session, on youtube.com only. YouTube can change that interface at any time; if it does, the script stops before moving anything where it can detect the change."
+      ]
     }
   ]
 }
