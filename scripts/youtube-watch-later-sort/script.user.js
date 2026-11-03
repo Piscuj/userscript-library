@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Watch Later Sort
 // @namespace    piscuj.youtube.watch-later-sort
-// @version      1.0.0
+// @version      1.0.1
 // @description  Sort your YouTube Watch Later playlist from shortest to longest video and save the order.
 // @updateURL    https://piscuj.github.io/userscript-library/scripts/youtube-watch-later-sort/script.meta.js
 // @downloadURL  https://piscuj.github.io/userscript-library/scripts/youtube-watch-later-sort/script.user.js
@@ -158,7 +158,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"youtube-watch-later-sort","version":"1.0.0","services":["youtube"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"youtube-watch-later-sort","version":"1.0.1","services":["youtube"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
@@ -274,8 +274,10 @@ if(cc.onLibrary())return;
       const headers={'Content-Type':'application/json','Authorization':await authorization(),'X-Origin':location.origin,'X-Goog-AuthUser':String(config('SESSION_INDEX')??0)};
       const pageId=config('DELEGATED_SESSION_ID');
       if(pageId)headers['X-Goog-PageId']=pageId;
-      const response=await fetch('/youtubei/v1/'+path+'?prettyPrint=false',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify({context,...body})});
-      if(response.ok)return response.json();
+      // Firefox's userscript world can't resolve relative URLs, and page code can't read script-owned objects.
+      const init=page.JSON.parse(JSON.stringify({method:'POST',credentials:'same-origin',headers,body:JSON.stringify({context,...body})}));
+      const response=await page.fetch(location.origin+'/youtubei/v1/'+path+'?prettyPrint=false',init);
+      if(response.ok)return JSON.parse(await response.text());
       if((response.status!==429&&response.status<500)||attempt>=RETRY_DELAYS_MS.length)throw Error('YouTube refused the request (HTTP '+response.status+').');
       await pause(RETRY_DELAYS_MS[attempt]);
     }

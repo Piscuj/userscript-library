@@ -102,3 +102,42 @@ test('only out-of-place videos move, and a sorted list needs no moves', () => {
   assert.deepEqual(moves, [{ action: 'ACTION_MOVE_VIDEO_AFTER', setVideoId: 'z', movedSetVideoIdPredecessor: 'c' }]);
   assert.deepEqual(plain(planMoves([item('b', 20), item('c', 30), item('a', 10)])), [{ action: 'ACTION_MOVE_VIDEO_AFTER', setVideoId: 'a' }]);
 });
+
+// Firefox's userscript world has no base URL for relative fetches, and page code
+// can't read objects the script owns, so requests must go through the page's own fetch.
+function firefoxLikeRequest(respond) {
+  const network = code.slice(code.indexOf('  const pause=ms'), code.indexOf('  async function readWatchLater'));
+  const pageOwned = new WeakSet(), calls = [];
+  const page = {
+    JSON: { parse: text => { const value = JSON.parse(text); pageOwned.add(value); return value; } },
+    ytcfg: { get: key => ({ INNERTUBE_CONTEXT: { client: {} }, LOGGED_IN: true, SESSION_INDEX: 0 })[key] },
+    fetch: async (url, init) => {
+      if (!pageOwned.has(init)) throw Error('Permission denied to access property');
+      calls.push({ url: String(new URL(url)), init });
+      return respond();
+    },
+  };
+  const sandbox = vm.createContext({
+    page, TextEncoder, crypto: globalThis.crypto, setTimeout,
+    location: { origin: 'https://www.youtube.com' },
+    document: { cookie: 'SAPISID=test' },
+    fetch: url => { new URL(url); throw Error('Used the userscript world fetch'); },
+  });
+  vm.runInContext('const RETRY_DELAYS_MS=[];\n' + network + '\nthis.callYouTube = callYouTube;', sandbox);
+  return { call: sandbox.callYouTube, calls };
+}
+
+test('requests use the page fetch, an absolute URL and a page-owned init', async () => {
+  const { call, calls } = firefoxLikeRequest(() => ({ ok: true, status: 200, text: async () => '{"status":"STATUS_SUCCEEDED"}' }));
+  const result = await call('browse', { browseId: 'VLWL' });
+  assert.equal(result.status, 'STATUS_SUCCEEDED');
+  assert.equal(calls[0].url, 'https://www.youtube.com/youtubei/v1/browse?prettyPrint=false');
+  assert.equal(calls[0].init.credentials, 'same-origin');
+  assert.match(calls[0].init.headers.Authorization, /^SAPISIDHASH \d+_[0-9a-f]{40}$/);
+  assert.equal(JSON.parse(calls[0].init.body).browseId, 'VLWL');
+});
+
+test('a refused request reports its status', async () => {
+  const { call } = firefoxLikeRequest(() => ({ ok: false, status: 403, text: async () => '' }));
+  await assert.rejects(call('browse', { browseId: 'VLWL' }), /HTTP 403/);
+});

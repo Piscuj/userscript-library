@@ -1,4 +1,7 @@
 {
+  "1.0.1": [
+    "Fix Firefox failing with \"not a valid URL\" when reading Watch Later."
+  ],
   "1.0.0": [
     "Sort Watch Later from shortest to longest and save the order on YouTube."
   ]
