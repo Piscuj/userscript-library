@@ -1,4 +1,7 @@
 {
+  "1.2.0": [
+    "Move the Sort by length button below Play all."
+  ],
   "1.1.0": [
     "One click now sorts and reloads the page, with no confirmation step or video counts."
   ],

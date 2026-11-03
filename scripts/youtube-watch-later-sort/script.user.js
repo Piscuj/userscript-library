@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Watch Later Sort
 // @namespace    piscuj.youtube.watch-later-sort
-// @version      1.1.0
+// @version      1.2.0
 // @description  Sort your YouTube Watch Later playlist from shortest to longest video and save the order.
 // @updateURL    https://piscuj.github.io/userscript-library/scripts/youtube-watch-later-sort/script.meta.js
 // @downloadURL  https://piscuj.github.io/userscript-library/scripts/youtube-watch-later-sort/script.user.js
@@ -158,7 +158,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"youtube-watch-later-sort","version":"1.1.0","services":["youtube"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"youtube-watch-later-sort","version":"1.2.0","services":["youtube"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
@@ -307,12 +307,14 @@ if(cc.onLibrary())return;
   }
 
   const isWatchLater=()=>location.pathname==='/playlist'&&new URLSearchParams(location.search).get('list')===PLAYLIST_ID;
+  const PANEL_BELOW_PLAY_ALL={position:'static',right:'',bottom:'',zIndex:'',maxWidth:'',padding:'0',marginTop:'8px',borderRadius:'',background:'transparent',boxShadow:'none'};
+  const PANEL_FLOATING={position:'fixed',right:'16px',bottom:'16px',zIndex:'2300',maxWidth:'min(340px,calc(100vw - 32px))',padding:'8px',marginTop:'0',borderRadius:'12px',background:'#212121',boxShadow:'0 2px 10px rgba(0,0,0,.4)'};
   let panel=null,status=null,actions=null,busy=false,stopRequested=false;
-  function button(label,onClick,primary) {
+  function button(label,onClick) {
     const element=document.createElement('button');
     element.type='button';
     element.textContent=label;
-    Object.assign(element.style,{minHeight:'36px',padding:'0 14px',border:'0',borderRadius:'18px',font:'500 14px Roboto,Arial,sans-serif',cursor:'pointer',background:primary?'#fff':'#3f3f3f',color:primary?'#0f0f0f':'#fff'});
+    Object.assign(element.style,{flex:'1 1 auto',minHeight:'40px',padding:'0 16px',border:'0',borderRadius:'20px',font:'500 14px Roboto,Arial,sans-serif',cursor:'pointer',background:'rgba(255,255,255,.2)',color:'#fff'});
     element.addEventListener('click',onClick);
     return element;
   }
@@ -321,8 +323,8 @@ if(cc.onLibrary())return;
     status.hidden=!message;
     actions.replaceChildren(...buttons);
   }
-  const showStart=()=>show('',[button('Sort by length',()=>{void sort();},true)]);
-  const closeButton=()=>button('Close',showStart,false);
+  const showStart=()=>show('',[button('Sort by length',()=>{void sort();})]);
+  const closeButton=()=>button('Close',showStart);
   function fail(error) {
     busy=false;
     show(error.message,[closeButton()]);
@@ -330,7 +332,7 @@ if(cc.onLibrary())return;
   async function sort() {
     busy=true;
     stopRequested=false;
-    show('Sorting…',[button('Stop',()=>{stopRequested=true;status.textContent='Stopping…';},false)]);
+    show('Sorting…',[button('Stop',()=>{stopRequested=true;status.textContent='Stopping…';})]);
     let moving=false;
     try {
       const moves=planMoves(await readWatchLater());
@@ -341,7 +343,9 @@ if(cc.onLibrary())return;
         show('Not fully sorted. Sort again to finish.',[closeButton()]);
         return;
       }
-      location.reload();
+      busy=false;
+      if(isWatchLater())location.reload();
+      else syncPanel();
     } catch(error) {
       fail(moving?Error(error.message+' The list may be partly sorted; sort again to finish.'):error);
     }
@@ -350,28 +354,32 @@ if(cc.onLibrary())return;
     panel=document.createElement('div');
     panel.setAttribute('role','group');
     panel.setAttribute('aria-label','Sort Watch Later');
-    Object.assign(panel.style,{position:'fixed',right:'16px',bottom:'16px',zIndex:'2300',maxWidth:'min(340px,calc(100vw - 32px))',padding:'8px',borderRadius:'12px',background:'#212121',color:'#fff',boxShadow:'0 2px 10px rgba(0,0,0,.4)',font:'400 14px/20px Roboto,Arial,sans-serif'});
+    Object.assign(panel.style,{color:'#fff',font:'400 14px/20px Roboto,Arial,sans-serif'});
     status=document.createElement('p');
     status.setAttribute('role','status');
     status.setAttribute('aria-live','polite');
-    Object.assign(status.style,{margin:'4px 6px 8px'});
+    Object.assign(status.style,{margin:'0 0 8px'});
     actions=document.createElement('div');
-    Object.assign(actions.style,{display:'flex',flexWrap:'wrap',justifyContent:'flex-end',gap:'8px'});
+    Object.assign(actions.style,{display:'flex',flexWrap:'wrap',gap:'8px'});
     panel.append(status,actions);
-    document.body.append(panel);
     showStart();
   }
-  // YouTube navigates without page loads, and a running sort must stay visible.
+  const visiblePlayMenu=()=>Array.from(document.querySelectorAll('ytd-playlist-header-renderer .play-menu')).find(menu=>menu.getClientRects().length);
+  // YouTube renders late, re-renders, swaps wide and small headers and navigates without
+  // page loads, so keep checking. A running sort must stay visible on any page.
   function syncPanel() {
-    if(isWatchLater()||busy) {
+    const menu=isWatchLater()?visiblePlayMenu():null;
+    if(menu) {
       if(!panel)createPanel();
-      panel.hidden=false;
-    } else if(panel) {
-      panel.hidden=true;
+      if(menu.nextElementSibling!==panel){menu.after(panel);Object.assign(panel.style,PANEL_BELOW_PLAY_ALL);}
+    } else if(panel&&busy) {
+      if(panel.parentElement!==document.body){document.body.append(panel);Object.assign(panel.style,PANEL_FLOATING);}
+    } else if(panel&&!isWatchLater()) {
+      panel.remove();
       showStart();
     }
   }
-  document.addEventListener('yt-navigate-finish',syncPanel);
+  setInterval(syncPanel,500);
   syncPanel();
 })();
 })();

@@ -137,6 +137,10 @@ test('requests use the page fetch, an absolute URL and a page-owned init', async
   assert.equal(JSON.parse(calls[0].init.body).browseId, 'VLWL');
 });
 
+async function until(condition) {
+  for (let i = 0; i < 400 && !condition(); i++) await new Promise(resolve => setTimeout(resolve, 5));
+}
+
 // Runs the whole feature against a small fake page and a fake YouTube playlist.
 function fakeYouTube(lengths, respond = () => null) {
   let order = lengths.map((seconds, index) => ({ id: 'v' + index, seconds }));
@@ -145,6 +149,7 @@ function fakeYouTube(lengths, respond = () => null) {
   const element = () => {
     const node = {
       style: {}, listeners: {}, append() {},
+      remove() { this.removed = true; },
       setAttribute(name, value) { this[name] = value; },
       addEventListener(type, fn) { this.listeners[type] = fn; },
       replaceChildren(...children) { buttons.length = 0; buttons.push(...children); },
@@ -174,25 +179,77 @@ function fakeYouTube(lengths, respond = () => null) {
   };
   const documentStub = {
     cookie: 'SAPISID=test',
-    body: { append() {} },
-    addEventListener() {},
+    body: { append(node) { node.parentElement = documentStub.body; } },
+    querySelectorAll: () => menus,
     createElement: () => { const node = element(); created.push(node); return node; },
   };
+  // YouTube keeps a wide and a small header; only one is displayed at a time.
+  const playMenu = visible => ({
+    visible,
+    getClientRects() { return this.visible ? [{}] : []; },
+    after(node) { this.nextElementSibling = node; node.parentElement = this; },
+  });
+  const menus = [playMenu(true), playMenu(false)];
+  let tick = () => {};
   const location = { origin: 'https://www.youtube.com', pathname: '/playlist', search: '?list=WL', reload: () => { reloads++; } };
   const start = code.indexOf("  'use strict';\n  const page=typeof unsafeWindow");
   const feature = code.slice(start, code.lastIndexOf('})();\n})();'));
-  vm.runInNewContext('(function () {\n' + feature + '})();', { unsafeWindow: page, window: page, document: documentStub, location, URLSearchParams, TextEncoder, crypto: globalThis.crypto, setTimeout: fn => setTimeout(fn, 0) });
+  vm.runInNewContext('(function () {\n' + feature + '})();', { unsafeWindow: page, window: page, document: documentStub, location, URLSearchParams, TextEncoder, crypto: globalThis.crypto, setTimeout: fn => setTimeout(fn, 0), setInterval: fn => { tick = fn; } });
   const status = created.find(node => node.role === 'status');
   return {
-    buttons, edits,
+    buttons, edits, menus, location,
+    panel: () => created.find(node => node.role === 'group'),
+    body: documentStub.body,
+    tick: () => tick(),
     label: () => buttons.map(node => node.textContent),
     status: () => status.textContent,
     click: name => buttons.find(node => node.textContent === name).listeners.click(),
-    settled: async () => { for (let i = 0; i < 200 && !reloads && !buttons.some(node => node.textContent === 'Close'); i++) await new Promise(resolve => setImmediate(resolve)); },
+    until,
+    settled: () => until(() => reloads || buttons.some(node => node.textContent === 'Close')),
     reloads: () => reloads,
     order: () => order.map(video => video.seconds),
   };
 }
+
+test('the button sits below the displayed Play all row and follows it when the layout changes', () => {
+  const youtube = fakeYouTube([10]);
+  const [wide, small] = youtube.menus;
+  assert.equal(wide.nextElementSibling, youtube.panel());
+  wide.visible = false;
+  small.visible = true;
+  youtube.tick();
+  assert.equal(small.nextElementSibling, youtube.panel());
+});
+
+test('the button appears once YouTube has rendered Play all, and only on Watch Later', () => {
+  const youtube = fakeYouTube([10]);
+  youtube.location.search = '?list=PL123';
+  youtube.tick();
+  assert.equal(youtube.panel().removed, true);
+
+  const late = fakeYouTube([10]);
+  const [wide] = late.menus;
+  wide.nextElementSibling = null;
+  wide.visible = false;
+  late.tick();
+  assert.equal(wide.nextElementSibling, null);
+  wide.visible = true;
+  late.tick();
+  assert.equal(wide.nextElementSibling, late.panel());
+});
+
+test('a running sort stays visible and does not reload a page you moved to', async () => {
+  const youtube = fakeYouTube([30, 10, 20]);
+  youtube.click('Sort by length');
+  youtube.location.pathname = '/watch';
+  youtube.location.search = '?v=x';
+  youtube.tick();
+  assert.equal(youtube.panel().parentElement, youtube.body);
+  assert.equal(youtube.panel().style.position, 'fixed');
+  await youtube.until(() => youtube.panel().removed);
+  assert.deepEqual(youtube.order(), [10, 20, 30]);
+  assert.equal(youtube.reloads(), 0);
+});
 
 test('one click sorts and reloads, with no confirmation or video counts', async () => {
   const youtube = fakeYouTube([30, 10, 20]);
