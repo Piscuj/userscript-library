@@ -1,4 +1,7 @@
 {
+  "1.1.0": [
+    "One click now sorts and reloads the page, with no confirmation step or video counts."
+  ],
   "1.0.1": [
     "Fix Firefox failing with \"not a valid URL\" when reading Watch Later."
   ],

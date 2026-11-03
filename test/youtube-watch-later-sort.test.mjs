@@ -137,6 +137,90 @@ test('requests use the page fetch, an absolute URL and a page-owned init', async
   assert.equal(JSON.parse(calls[0].init.body).browseId, 'VLWL');
 });
 
+// Runs the whole feature against a small fake page and a fake YouTube playlist.
+function fakeYouTube(lengths, respond = () => null) {
+  let order = lengths.map((seconds, index) => ({ id: 'v' + index, seconds }));
+  const buttons = [], edits = [];
+  let reloads = 0;
+  const element = () => {
+    const node = {
+      style: {}, listeners: {}, append() {},
+      setAttribute(name, value) { this[name] = value; },
+      addEventListener(type, fn) { this.listeners[type] = fn; },
+      replaceChildren(...children) { buttons.length = 0; buttons.push(...children); },
+    };
+    return node;
+  };
+  const created = [];
+  const page = {
+    JSON,
+    ytcfg: { get: key => ({ INNERTUBE_CONTEXT: { client: {} }, LOGGED_IN: true, SESSION_INDEX: 0 })[key] },
+    fetch: async (url, init) => {
+      const body = JSON.parse(init.body);
+      const failure = respond(url);
+      if (failure) return failure;
+      if (url.includes('edit_playlist')) {
+        edits.push(body.actions);
+        for (const move of body.actions) {
+          const [moved] = order.splice(order.findIndex(video => video.id === move.setVideoId), 1);
+          const after = move.movedSetVideoIdPredecessor;
+          order.splice(after ? order.findIndex(video => video.id === after) + 1 : 0, 0, moved);
+        }
+        return { ok: true, status: 200, text: async () => '{"status":"STATUS_SUCCEEDED"}' };
+      }
+      const contents = order.map(video => ({ playlistVideoRenderer: { videoId: video.id, setVideoId: video.id, lengthSeconds: String(video.seconds) } }));
+      return { ok: true, status: 200, text: async () => JSON.stringify({ contents }) };
+    },
+  };
+  const documentStub = {
+    cookie: 'SAPISID=test',
+    body: { append() {} },
+    addEventListener() {},
+    createElement: () => { const node = element(); created.push(node); return node; },
+  };
+  const location = { origin: 'https://www.youtube.com', pathname: '/playlist', search: '?list=WL', reload: () => { reloads++; } };
+  const start = code.indexOf("  'use strict';\n  const page=typeof unsafeWindow");
+  const feature = code.slice(start, code.lastIndexOf('})();\n})();'));
+  vm.runInNewContext('(function () {\n' + feature + '})();', { unsafeWindow: page, window: page, document: documentStub, location, URLSearchParams, TextEncoder, crypto: globalThis.crypto, setTimeout: fn => setTimeout(fn, 0) });
+  const status = created.find(node => node.role === 'status');
+  return {
+    buttons, edits,
+    label: () => buttons.map(node => node.textContent),
+    status: () => status.textContent,
+    click: name => buttons.find(node => node.textContent === name).listeners.click(),
+    settled: async () => { for (let i = 0; i < 200 && !reloads && !buttons.some(node => node.textContent === 'Close'); i++) await new Promise(resolve => setImmediate(resolve)); },
+    reloads: () => reloads,
+    order: () => order.map(video => video.seconds),
+  };
+}
+
+test('one click sorts and reloads, with no confirmation or video counts', async () => {
+  const youtube = fakeYouTube([30, 10, 20]);
+  assert.deepEqual(youtube.label(), ['Sort by length']);
+  youtube.click('Sort by length');
+  assert.doesNotMatch(youtube.status(), /\d/);
+  await youtube.settled();
+  assert.deepEqual(youtube.order(), [10, 20, 30]);
+  assert.equal(youtube.reloads(), 1);
+});
+
+test('an already sorted list just reloads without moving anything', async () => {
+  const youtube = fakeYouTube([10, 20, 30]);
+  youtube.click('Sort by length');
+  await youtube.settled();
+  assert.equal(youtube.edits.length, 0);
+  assert.equal(youtube.reloads(), 1);
+});
+
+test('a failure stays on screen instead of reloading', async () => {
+  const youtube = fakeYouTube([30, 10], url => (url.includes('edit_playlist') ? { ok: false, status: 403, text: async () => '' } : null));
+  youtube.click('Sort by length');
+  await youtube.settled();
+  assert.equal(youtube.reloads(), 0);
+  assert.match(youtube.status(), /HTTP 403/);
+  assert.deepEqual(youtube.label(), ['Close']);
+});
+
 test('a refused request reports its status', async () => {
   const { call } = firefoxLikeRequest(() => ({ ok: false, status: 403, text: async () => '' }));
   await assert.rejects(call('browse', { browseId: 'VLWL' }), /HTTP 403/);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Watch Later Sort
 // @namespace    piscuj.youtube.watch-later-sort
-// @version      1.0.1
+// @version      1.1.0
 // @description  Sort your YouTube Watch Later playlist from shortest to longest video and save the order.
 // @updateURL    https://piscuj.github.io/userscript-library/scripts/youtube-watch-later-sort/script.meta.js
 // @downloadURL  https://piscuj.github.io/userscript-library/scripts/youtube-watch-later-sort/script.user.js
@@ -158,7 +158,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"youtube-watch-later-sort","version":"1.0.1","services":["youtube"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"youtube-watch-later-sort","version":"1.1.0","services":["youtube"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
@@ -282,7 +282,7 @@ if(cc.onLibrary())return;
       await pause(RETRY_DELAYS_MS[attempt]);
     }
   }
-  async function readWatchLater(onProgress) {
+  async function readWatchLater() {
     const items=[],seen=new Set();
     let request={browseId:'VL'+PLAYLIST_ID};
     for(let pageNumber=0;pageNumber<MAX_PAGES;pageNumber++) {
@@ -293,25 +293,20 @@ if(cc.onLibrary())return;
         if(!item.setVideoId)throw Error('YouTube changed its playlist format, so nothing was moved. The script needs an update.');
         if(!seen.has(item.setVideoId)){seen.add(item.setVideoId);items.push(item);}
       }
-      onProgress(items.length);
       if(!parsed.continuation)return items;
       request={continuation:parsed.continuation};
     }
     throw Error('Watch Later is too long to read completely, so nothing was moved.');
   }
-  async function applyMoves(moves,onProgress,shouldStop) {
-    for(let start=0;start<moves.length;start+=BATCH_SIZE) {
-      if(shouldStop())return false;
+  async function applyMoves(moves,shouldStop) {
+    for(let start=0;start<moves.length&&!shouldStop();start+=BATCH_SIZE) {
       const response=await callYouTube('browse/edit_playlist',{playlistId:PLAYLIST_ID,actions:moves.slice(start,start+BATCH_SIZE)});
       if(response.status!=='STATUS_SUCCEEDED')throw Error('YouTube did not accept a move.');
-      onProgress(Math.min(start+BATCH_SIZE,moves.length));
       await pause(BATCH_PAUSE_MS);
     }
-    return true;
   }
 
   const isWatchLater=()=>location.pathname==='/playlist'&&new URLSearchParams(location.search).get('list')===PLAYLIST_ID;
-  const plural=(count,word)=>count+' '+word+(count===1?'':'s');
   let panel=null,status=null,actions=null,busy=false,stopRequested=false;
   function button(label,onClick,primary) {
     const element=document.createElement('button');
@@ -326,41 +321,29 @@ if(cc.onLibrary())return;
     status.hidden=!message;
     actions.replaceChildren(...buttons);
   }
-  const showStart=()=>show('',[button('Sort by length',()=>{void prepare();},true)]);
+  const showStart=()=>show('',[button('Sort by length',()=>{void sort();},true)]);
   const closeButton=()=>button('Close',showStart,false);
   function fail(error) {
     busy=false;
     show(error.message,[closeButton()]);
   }
-  async function prepare() {
-    busy=true;
-    show('Reading Watch Later…',[]);
-    try {
-      const items=await readWatchLater(count=>{status.textContent='Reading Watch Later… '+plural(count,'video');});
-      const moves=planMoves(items);
-      busy=false;
-      if(!items.length){show('Watch Later is empty.',[closeButton()]);return;}
-      if(!moves.length){show('Already sorted: '+plural(items.length,'video')+'.',[closeButton()]);return;}
-      const unknown=items.filter(item=>item.seconds===null).length;
-      show('Sort '+plural(items.length,'video')+' from shortest to longest? This needs '+plural(moves.length,'move')+' and replaces the saved order, which can’t be restored.'+(unknown?' '+plural(unknown,'video')+' without a length (such as live streams) will go last.':''),
-        [button('Sort',()=>{void run(moves);},true),button('Cancel',showStart,false)]);
-    } catch(error) { fail(error); }
-  }
-  async function run(moves) {
+  async function sort() {
     busy=true;
     stopRequested=false;
-    show('Moving 0 of '+moves.length+'…',[button('Stop',()=>{stopRequested=true;status.textContent='Stopping…';},false)]);
+    show('Sorting…',[button('Stop',()=>{stopRequested=true;status.textContent='Stopping…';},false)]);
+    let moving=false;
     try {
-      const finished=await applyMoves(moves,done=>{if(!stopRequested)status.textContent='Moving '+done+' of '+moves.length+'…';},()=>stopRequested);
-      if(!finished){busy=false;show('Stopped. The list is partly sorted; sort again to finish.',[button('Reload',()=>location.reload(),true),closeButton()]);return;}
-      show('Checking the saved order…',[]);
-      const items=await readWatchLater(()=>{});
-      const left=planMoves(items).length;
-      busy=false;
-      if(left)show('Not fully sorted: '+plural(left,'video')+' still out of place. Sort again to finish.',[closeButton()]);
-      else show('Sorted '+plural(items.length,'video')+'.',[button('Reload',()=>location.reload(),true)]);
+      const moves=planMoves(await readWatchLater());
+      moving=moves.length>0;
+      await applyMoves(moves,()=>stopRequested);
+      if(moving&&!stopRequested&&planMoves(await readWatchLater()).length){
+        busy=false;
+        show('Not fully sorted. Sort again to finish.',[closeButton()]);
+        return;
+      }
+      location.reload();
     } catch(error) {
-      fail(Error(error.message+' The list may be partly sorted; sort again to finish.'));
+      fail(moving?Error(error.message+' The list may be partly sorted; sort again to finish.'):error);
     }
   }
   function createPanel() {
