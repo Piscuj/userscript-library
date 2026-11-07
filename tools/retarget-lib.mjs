@@ -3,7 +3,7 @@
 // Every rewrite must match exactly once (or already be applied), so a changed
 // source build fails loudly instead of shipping half-retargeted code.
 
-export const OLD_ORIGIN = 'https://userscript-library.piscuj.chatgpt.site';
+const OLD_ORIGIN = 'https://userscript-library.piscuj.chatgpt.site';
 const OLD_LIBRARY_MATCH = OLD_ORIGIN + '/control-centre/*';
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEADER_END = '// ==/UserScript==';
