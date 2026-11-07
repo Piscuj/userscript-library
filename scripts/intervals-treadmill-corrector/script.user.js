@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Intervals.icu Treadmill Distance Corrector
 // @namespace    local.intervals-treadmill
-// @version      1.4.3
+// @version      1.4.4
 // @updateURL    https://piscuj.github.io/userscript-library/scripts/intervals-treadmill-corrector/script.meta.js
 // @downloadURL  https://piscuj.github.io/userscript-library/scripts/intervals-treadmill-corrector/script.user.js
 // @description  Correct treadmill distance and pace in Intervals.icu with FIT verification and original-file recovery.
@@ -159,7 +159,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-treadmill-corrector","version":"1.4.3","old":"1.4.0","services":["intervals","intervals-api"],"changes":["Saves applied stage layouts and restores them when reopening the same corrected FIT.","Stage speed edits and 0.01 km/h controls update total distance; speeds display two decimals.","Moderate dark theme, compact file actions, revised Based on selector, and totals below the stages."]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-treadmill-corrector","version":"1.4.4","old":"1.4.0","services":["intervals","intervals-api"],"changes":["Saves applied stage layouts and restores them when reopening the same corrected FIT.","Stage speed edits and 0.01 km/h controls update total distance; speeds display two decimals.","Moderate dark theme, compact file actions, revised Based on selector, and totals below the stages."]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 /* Bundled Garmin FIT SDK 21.218.0. License agreement:
 This Flexible and Interoperable Data Transfer (FIT) Protocol License Agreement
@@ -36610,7 +36610,7 @@ self.onmessage=event=>{
   <table id="summary" class="comparison"><thead><tr><th>Version</th><th>Distance \xB7 pace \xB7 speed</th></tr></thead><tbody><tr><th>FIT samples</th><td id="before"></td></tr><tr><th>Corrected</th><td id="after"></td></tr></tbody></table>
   <label id="largeLabel" hidden><input id="large" type="checkbox"> I acknowledge a correction larger than 20%.</label>
   <label id="treadmillLabel" hidden><input id="treadmill" type="checkbox"> I confirm this is the treadmill workout I intend to correct.</label>
-  </div><div class="file-actions" role="group" aria-label="File actions"><div class="action-row"><button class="primary" id="apply" disabled>Apply Correction</button><button id="restore" hidden>Restore Original File</button><button id="key">Configure API key</button><button id="close">Close</button></div></div><p class="muted version">v1.4.3</p></section></div>`;
+  </div><div class="file-actions" role="group" aria-label="File actions"><div class="action-row"><button class="primary" id="apply" disabled>Apply Correction</button><button id="restore" hidden>Restore Original File</button><button id="key">Configure API key</button><button id="close">Close</button></div></div><p class="muted version">v1.4.4</p></section></div>`;
     const el = (name) => shadow.getElementById(name);
     const input = el("distance");
     const checked = (name) => el(name).checked;
@@ -36632,6 +36632,35 @@ self.onmessage=event=>{
       } catch (e) {
         stageIssue = e.message;
       }
+    }
+    // Press and hold repeats a step: once on press, then every 60 ms after 400 ms.
+    // Keyboard clicks (detail 0) still step once; pointer clicks were handled on press.
+    function holdToRepeat(button, step) {
+      let timer = 0;
+      const stop = () => {
+        clearTimeout(timer);
+        clearInterval(timer);
+        timer = 0;
+      };
+      const tick = () => {
+        if (!button.isConnected || button.disabled) return stop();
+        step();
+      };
+      button.style.touchAction = "none";
+      button.onpointerdown = (e) => {
+        if (e.button !== 0 || button.disabled) return;
+        e.preventDefault();
+        stop();
+        step();
+        timer = setTimeout(() => {
+          timer = setInterval(tick, 60);
+        }, 400);
+      };
+      for (const type of ["pointerup", "pointercancel", "pointerleave", "blur"]) button.addEventListener(type, stop);
+      button.oncontextmenu = (e) => e.preventDefault();
+      button.onclick = (e) => {
+        if (e.detail === 0) step();
+      };
     }
     function renderStages() {
       el("stageRows").replaceChildren();
@@ -36660,13 +36689,13 @@ self.onmessage=event=>{
           speedEdit = null;
           sync();
         };
-        for (const direction of ["minus", "plus"]) row.querySelector(".speed-" + direction).onclick = () => {
+        for (const direction of ["minus", "plus"]) holdToRepeat(row.querySelector(".speed-" + direction), () => {
           const hundredths = (parseDistance(speed.value) || 0) * 100, next = direction === "plus" ? Math.floor(hundredths + 1e-9) + 1 : Math.ceil(hundredths - 1e-9) - 1;
           stage.kph = Math.max(0.01, Math.min(50, next / 100));
           speedEdit = null;
           updateDistanceFromStages();
           sync();
-        };
+        });
         const merge = row.querySelector(".merge");
         if (merge) merge.onclick = () => {
           try {
@@ -36909,13 +36938,13 @@ self.onmessage=event=>{
         sync(true);
       };
       for (const name of ["large", "treadmill"]) el(name).onchange = () => sync();
-      for (const name of ["minus", "plus"]) el(name).onclick = () => {
+      for (const name of ["minus", "plus"]) holdToRepeat(el(name), () => {
         const hundredths = (parseDistance(input.value) || 0) * 100;
         const next = name === "plus" ? Math.floor(hundredths + 1e-9) + 1 : Math.ceil(hundredths - 1e-9) - 1;
         input.value = (Math.min(1e5, Math.max(0, next)) / 100).toFixed(2);
         el("large").checked = false;
         sync(true);
-      };
+      });
       el("apply").onclick = (e) => {
         if (!e.isTrusted || el("apply").disabled) return;
         void run(async () => {
