@@ -5,7 +5,7 @@
 
 export const OLD_ORIGIN = 'https://userscript-library.piscuj.chatgpt.site';
 const OLD_LIBRARY_MATCH = OLD_ORIGIN + '/control-centre/*';
-const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEADER_END = '// ==/UserScript==';
 
 export function libraryUrls({ origin, basePath }, id) {
@@ -16,6 +16,11 @@ export function libraryUrls({ origin, basePath }, id) {
     downloadURL: root + 'scripts/' + id + '/script.user.js',
     updateURL: root + 'scripts/' + id + '/script.meta.js',
   };
+}
+
+// True when the header already has an @match line for the library page.
+export function matchesLibrary(header, match) {
+  return new RegExp('^// @match\\s+' + match.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + '$', 'm').test(header);
 }
 
 export function splitHeader(code) {
@@ -84,9 +89,8 @@ export function retarget(code, library, id, { version } = {}) {
 
   header = setTag(header, 'updateURL', urls.updateURL);
   header = setTag(header, 'downloadURL', urls.downloadURL);
-  const hasLibraryMatch = new RegExp('^// @match\\s+' + urls.match.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + '$', 'm');
   if (header.includes(OLD_LIBRARY_MATCH)) header = header.split(OLD_LIBRARY_MATCH).join(urls.match);
-  else if (!hasLibraryMatch.test(header)) header = header.replace(HEADER_END, '// @match        ' + urls.match + '\n' + HEADER_END);
+  else if (!matchesLibrary(header, urls.match)) header = header.replace(HEADER_END, '// @match        ' + urls.match + '\n' + HEADER_END);
 
   body = retargetReporter(body, library);
   if (version && version !== previous) {

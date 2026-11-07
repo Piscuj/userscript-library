@@ -4,9 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
-import { libraryUrls, readTag, splitHeader } from './tools/retarget-lib.mjs';
+import { ID_PATTERN, libraryUrls, matchesLibrary, readTag, splitHeader } from './tools/retarget-lib.mjs';
 
-const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const VERSION_PATTERN = /^\d+(?:\.\d+)*$/;
 const SITE_FILES = ['styles.css', 'model.js', 'app.js', 'icon.svg', 'favicon.ico', 'apple-touch-icon.png'];
 
@@ -128,7 +127,7 @@ export function buildLibrary(root = path.dirname(fileURLToPath(import.meta.url))
     if (readTag(header, 'downloadURL') !== urls.downloadURL) fail('@downloadURL must be ' + urls.downloadURL);
     if (readTag(header, 'updateURL') !== urls.updateURL) fail('@updateURL must be ' + urls.updateURL);
     if (code.includes('piscuj.chatgpt.site')) fail('still references the old library host');
-    if (code.includes('function createControlReporter(') && !new RegExp('^// @match\\s+' + urls.match.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + '$', 'm').test(header)) {
+    if (code.includes('function createControlReporter(') && !matchesLibrary(header, urls.match)) {
       fail('reporter present but no @match for ' + urls.match + ', so the library cannot detect it');
     }
     try { new vm.Script(code, { filename: item.id + '.user.js' }); } catch (error) { fail('syntax error: ' + error.message); }
