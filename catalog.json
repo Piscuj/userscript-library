@@ -35,7 +35,7 @@
         "Daily balance is intake minus a base of 2,400 kcal and recorded activity calories. To change the base, open the Tampermonkey menu on Intervals.icu and choose Set base calories. It is saved separately in each browser.",
         "Weekly averages exclude missing values and future days. Explicit zero values are included.",
         "The scale-icon value is the change in 14-day average weight from the previous Sunday to the week's end, or to today in the current week. It needs 8 readings in each 14-day window.",
-        "The kg value in brackets after the calorie balance is the change predicted from net calories at 7,700 kcal/kg, delayed the same way as the average. It needs 70% of those days logged.",
+        "The kg value in brackets after the calorie balance is the change predicted from that week’s net calories at 7,700 kcal/kg. It needs 70% of the week’s days logged so far.",
         "The script reads the loaded calendar without editing your records."
       ]
     },

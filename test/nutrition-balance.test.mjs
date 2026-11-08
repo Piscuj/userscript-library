@@ -60,10 +60,7 @@ test('weight colour differs from the calorie colour in both themes', () => {
 
 test('prediction does not need weigh-ins', () => {
   const end = '2026-10-25';
-  const records = history(end, 20, () => ({ kcalConsumed: 2750 }));
-  const span = run('weekSpan(days, currentDay)', { days: weekOf(end), currentDay: end });
-  assert.deepEqual(span, { end, previousEnd: '2026-10-18', span: 7 });
-  close(run('expectedWeightChange(records, calorieMap([]), end, 7, end)', { records, end }).value, 0.5);
+  close(predict(loggedWeek(end, () => 2750), end).value, 0.5);
 });
 
 test('daily balance keeps its kcal label', () => {
@@ -158,66 +155,65 @@ test('temporary and non-positive weights are not readings', () => {
   close(change.value, 0);
 });
 
+// A Monday-to-Sunday week; `intake(daysBeforeSunday)` returns each day's kcal, or undefined when it isn't logged.
+const loggedWeek = (sunday, intake) => weekOf(sunday).map((row, i) => ({ ...row, wellness: { kcalConsumed: intake(6 - i) } }));
+const predict = (days, currentDay, activities = []) => run('expectedWeightChange(days, calorieMap(activities), currentDay)', { days, activities, currentDay });
+
 test('a steady balance predicts 7 days of net calories at 7700 kcal/kg', () => {
   const end = '2026-10-25';
-  const records = history(end, 21, () => ({ kcalConsumed: 1650 })); // 550 kcal/day below the 2200 base
-  const expected = run('expectedWeightChange(records, calorieMap([]), end, 7, end)', { records, end });
+  const expected = predict(loggedWeek(end, () => 1650), end); // 550 kcal/day below the 2200 base
   close(expected.value, -0.5);
-  assert.equal(expected.count, 20);
+  assert.equal(expected.count, 7);
+  assert.equal(expected.days, 7);
 });
 
-test('prediction weights calories the way the 14-day average delays them', () => {
-  // A surplus 10 days ago is fully inside the change; one 19 days ago has mostly left it, and today has barely entered.
+test('prediction is the week\'s average balance over its days, whatever the days around it', () => {
+  const end = '2026-11-08';
+  const expected = predict(loggedWeek(end, () => 2200 - 67), end);
+  close(expected.value, -67 * 7 / 7700);
+});
+
+test('every logged day of the week counts equally', () => {
   const end = '2026-10-25';
-  const surplusOn = daysAgo => history(end, 20, ago => ({ kcalConsumed: ago === daysAgo ? 2200 + 7700 : 2200 }));
-  const predict = daysAgo => run('expectedWeightChange(records, calorieMap([]), end, 7, end)', { records: surplusOn(daysAgo), end }).value;
-  close(predict(10), 0.5);
-  close(predict(19), 1 / 14);
-  close(predict(0), 1 / 14);
+  const surplusOn = daysAgo => predict(loggedWeek(end, ago => (ago === daysAgo ? 2200 + 7700 : 2200)), end).value;
+  close(surplusOn(0), 1);
+  close(surplusOn(6), 1);
 });
 
 test('prediction counts activity calories and fills a few unlogged days with the average', () => {
   const end = '2026-10-25';
-  const records = history(end, 20, ago => (ago < 4 ? {} : { kcalConsumed: 3300 }));
-  const activities = history(end, 20, () => ({ calories: 550 })).map((row, i) => ({ id: i, start_date_local: row.id + 'T07:00:00', calories: row.calories }));
-  const expected = run('expectedWeightChange(records, calorieMap(activities), end, 7, end)', { records, activities, end });
-  assert.equal(expected.count, 16);
+  const activities = history(end, 7, () => ({ calories: 550 })).map((row, i) => ({ id: i, start_date_local: row.id + 'T07:00:00', calories: row.calories }));
+  const expected = predict(loggedWeek(end, ago => (ago < 2 ? undefined : 3300)), end, activities);
+  assert.equal(expected.count, 5);
   close(expected.value, 0.5);
 });
 
-test('prediction needs at least 14 of the 20 days logged', () => {
+test('prediction needs 70% of the week\'s days logged', () => {
   const end = '2026-10-25';
-  const records = history(end, 20, ago => (ago < 7 ? {} : { kcalConsumed: 2200 }));
-  assert.equal(run('expectedWeightChange(records, calorieMap([]), end, 7, end)', { records, end }), null);
+  assert.equal(predict(loggedWeek(end, ago => (ago < 3 ? undefined : 2200)), end), null);
 });
 
-test('prediction covers only the days since last Sunday', () => {
-  const end = '2026-11-04';
-  const records = history(end, 15, () => ({ kcalConsumed: 1650 })); // 550 kcal/day below the 2200 base
-  const expected = run('expectedWeightChange(records, calorieMap([]), end, 3, end)', { records, end });
+test('the current week\'s prediction covers only the days up to today', () => {
+  const sunday = '2026-11-08', today = '2026-11-04';
+  const expected = predict(loggedWeek(sunday, ago => (ago >= 4 ? 1650 : 9999)), today);
   close(expected.value, -3 * 550 / 7700);
-  assert.equal(expected.count, 15);
-  assert.equal(expected.days, 16);
+  assert.equal(expected.count, 3);
+  assert.equal(expected.days, 3);
 });
 
-test('prediction on the first day of a week needs 70% of 14 days', () => {
-  const end = '2026-11-02';
-  const enough = history(end, 10, () => ({ kcalConsumed: 2750 }));
-  const expected = run('expectedWeightChange(records, calorieMap([]), end, 1, end)', { records: enough, end });
-  close(expected.value, 550 / 7700);
-  assert.equal(run('expectedWeightChange(records, calorieMap([]), end, 1, end)', { records: enough.slice(1), end }), null);
+test('a future week has no prediction', () => {
+  assert.equal(predict(loggedWeek('2026-11-15', () => 2750), '2026-11-02'), null);
 });
 
 // Firefox: a page array's own filter/map reject callbacks from the userscript sandbox.
 test('page wellness arrays are read without passing them callbacks', () => {
   const end = '2026-10-25';
-  const records = history(end, 21, ago => ({ weight: 80 + ago * 0.1, kcalConsumed: 2200 }));
+  const records = history(end, 21, ago => ({ weight: 80 + ago * 0.1 }));
   for (const method of ['filter', 'map', 'forEach', 'find', 'reduce', 'some', 'every']) {
     records[method] = () => { throw new Error('Permission denied to access object'); };
   }
   const change = run('weekWeightChange(days, records, currentDay)', { days: weekOf(end), records, currentDay: end });
   close(change.value, -0.7);
-  close(run('expectedWeightChange(records, calorieMap([]), end, 7, end)', { records, end }).value, 0);
 });
 
 test('kg values are signed to two decimals without a negative zero', () => {

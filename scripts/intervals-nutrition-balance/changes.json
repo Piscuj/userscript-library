@@ -1,4 +1,7 @@
 {
+  "0.5.5": [
+    "The weight change in brackets now comes only from that week’s calories, so it matches the calorie balance beside it. It needs 70% of the week’s days logged."
+  ],
   "0.5.4": [
     "The calorie base is now 2,400 kcal instead of 2,200, so balances and predicted weight change are lower.",
     "You can change the base without editing the script: open the Tampermonkey menu on Intervals.icu and choose Set base calories. It is saved separately in each browser."

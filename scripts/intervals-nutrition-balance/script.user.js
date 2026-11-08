@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Intervals.icu Nutrition Balance
 // @namespace piscuj.intervals.nutrition-balance
-// @version 0.5.4
+// @version 0.5.5
 // @description Weekly calorie balance and protein, fat and carb averages in the Intervals.icu calendar.
 // @match https://intervals.icu/*
 // @match https://www.intervals.icu/*
@@ -160,7 +160,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.4","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"intervals-nutrition-balance","version":"0.5.5","old":"0.2.2","services":["intervals"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
@@ -256,19 +256,10 @@ if(cc.onLibrary())return;
     const now = averageWeight(records, end), previous = averageWeight(records, previousEnd);
     return now && previous ? {value: now.value-previous.value, end, previousEnd, span, average: now.value, count: now.count, previousAverage: previous.value, previousCount: previous.count} : null;
   }
-  // Over `span` days, a change in a 14-day average spreads each day's weight over 13+span days, so calories get the same shares.
-  function expectedWeightChange(records, active, end, span, currentDay) {
-    const byDate = new Map(), rows = [], days = AVERAGE_DAYS-1+span;
-    for (const r of records) byDate.set(r.id, r);
-    for (let ago = 0; ago < days; ago++) {
-      const date = shiftDate(end, -ago);
-      const row = balance({date: {toISODate: () => date}, wellness: byDate.get(date)}, active, currentDay);
-      rows.push({share: (Math.min(ago+1,AVERAGE_DAYS) - Math.max(ago-span+1,0))/AVERAGE_DAYS, value: row ? row.value : null});
-    }
-    const logged = rows.filter(row => row.value !== null);
-    if (logged.length < Math.ceil(days*MIN_LOGGED_SHARE)) return null;
-    const fill = logged.reduce((sum,row) => sum+row.value,0)/logged.length;
-    return {value: rows.reduce((sum,row) => sum+row.share*(row.value ?? fill),0)/KCAL_PER_KG, count: logged.length, days};
+  function expectedWeightChange(days, active, currentDay) {
+    const summary = weekBalance(days, active, currentDay), period = weekSpan(days, currentDay);
+    if (!summary || !period || summary.count < Math.ceil(period.span*MIN_LOGGED_SHARE)) return null;
+    return {value: summary.value*period.span/KCAL_PER_KG, count: summary.count, days: period.span};
   }
   // Intervals' production Vue renderer keeps the root VNode on its app container.
   // Walk only the rendered tree, without changing any application state or data.
@@ -432,8 +423,8 @@ if(cc.onLibrary())return;
         const summary = weekBalance(days,active,currentDay);
         if (header) {
           const reference=header.querySelector('.summary-grid, .data');
-          const period=weekSpan(days,currentDay), expected=period&&expectedWeightChange(records,active,period.end,period.span,currentDay);
-          const predicted=expected?` Brackets: weight change predicted from net calories at ${KCAL_PER_KG} kcal/kg over the last ${expected.days} days, weighted by how the 14-day average delays them. ${expected.count} of ${expected.days} days logged; gaps use their average.`:'';
+          const expected=expectedWeightChange(days,active,currentDay);
+          const predicted=expected?` Brackets: weight change predicted from this week's net calories at ${KCAL_PER_KG} kcal/kg. ${expected.count} of ${expected.days} days logged; gaps use their average. The 14-day average weight reacts more slowly, so it can differ when intake changes between weeks.`:'';
           if(summary) badge(header,summary.value,`Average daily calorie balance: ${format(summary.value)} kcal/day across ${summary.count} logged ${summary.count === 1 ? 'day' : 'days'}. Intake \u2212 (${base} + active kcal). Includes today when logged; missing intake and future days are excluded. Change the ${base} kcal base in the Tampermonkey menu.${predicted}`,true,keep,reference,calendarElement,expected);
           macroBadges(header,weekMacros(days,currentDay),keep,reference,calendarElement);
           weightBadge(header,weekWeightChange(days,records,currentDay),expected,keep,reference,calendarElement);
