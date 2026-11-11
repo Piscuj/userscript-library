@@ -14,12 +14,12 @@ The library page shows each script's installed and published version. Click **In
 
 ## Publish a script change
 
-1. Build the script in its own project (in `C:\Users\bluec\Documents\ChatGPT\…`) with a higher `@version`.
-2. Import it. This also rewrites URLs, `@match` and the reporter to point at this library:
+1. Edit `scripts/<id>/script.user.js` here. Tests for Liftosaur Details and Pomelo to Fitatu live in the private `userscript-tests` repo, which reads the scripts from this checkout; write the failing test there first.
+2. Bump the version everywhere the script carries it:
    ```
-   node tools/retarget.mjs <id> <path-to-built.user.js>
+   node tools/retarget.mjs <id> scripts/<id>/script.user.js --version X.Y.Z
    ```
-   Or pass `--version X.Y.Z` to bump while importing.
+   The same tool imports a script built elsewhere (`node tools/retarget.mjs <id> <path-to-built.user.js>`), rewriting its URLs, `@match` and reporter to point at this library.
 3. Add notes for the new version to `scripts/<id>/changes.json`.
 4. `npm test`, then `npm run preview` and open http://127.0.0.1:4180/userscript-library/.
 5. Commit and push to `main`. Check that the Actions run is green and the live `script.meta.js` shows the new version.
