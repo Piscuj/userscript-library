@@ -167,21 +167,23 @@ function fakeYouTube(lengths, respond = () => null) {
       if (url.includes('edit_playlist')) {
         edits.push(body.actions);
         for (const move of body.actions) {
-          const [moved] = order.splice(order.findIndex(video => video.id === move.setVideoId), 1);
+          if (move.action === 'ACTION_REMOVE_VIDEO') { order = order.filter(video => 'set-' + video.id !== move.setVideoId); continue; }
+          const [moved] = order.splice(order.findIndex(video => 'set-' + video.id === move.setVideoId), 1);
           const after = move.movedSetVideoIdPredecessor;
-          order.splice(after ? order.findIndex(video => video.id === after) + 1 : 0, 0, moved);
+          order.splice(after ? order.findIndex(video => 'set-' + video.id === after) + 1 : 0, 0, moved);
         }
         return { ok: true, status: 200, text: async () => '{"status":"STATUS_SUCCEEDED"}' };
       }
-      const contents = order.map(video => ({ playlistVideoRenderer: { videoId: video.id, setVideoId: video.id, lengthSeconds: String(video.seconds) } }));
+      const contents = order.map(video => ({ playlistVideoRenderer: { videoId: video.id, setVideoId: 'set-' + video.id, lengthSeconds: String(video.seconds) } }));
       return { ok: true, status: 200, text: async () => JSON.stringify({ contents }) };
     },
   };
   const documentStub = {
     cookie: 'SAPISID=test',
     body: { append(node) { node.parentElement = documentStub.body; } },
-    querySelectorAll: () => menus,
+    querySelectorAll: selector => (selector.includes('play-menu') ? menus : rows),
     createElement: () => { const node = element(); created.push(node); return node; },
+    createElementNS: () => element(),
   };
   // YouTube keeps a wide and a small header; only one is displayed at a time.
   const playMenu = visible => ({
@@ -190,14 +192,28 @@ function fakeYouTube(lengths, respond = () => null) {
     after(node) { this.nextElementSibling = node; node.parentElement = this; },
   });
   const menus = [playMenu(true), playMenu(false)];
+  // Video rows as YouTube renders them: a title link and a #meta block under it.
+  const row = id => {
+    const meta = {
+      children: [],
+      append(node) { this.children.push(node); node.remove = () => { this.children.splice(this.children.indexOf(node), 1); }; },
+      querySelector() { return this.children[0] ?? null; },
+    };
+    return {
+      href: '/watch?v=' + id + '&list=WL&index=1', dataset: {}, style: {}, meta,
+      querySelector(selector) { return selector === '#meta' ? meta : { getAttribute: () => this.href }; },
+      button() { return meta.children[0]; },
+    };
+  };
+  const rows = order.map(video => row(video.id));
   let tick = () => {};
   const location = { origin: 'https://www.youtube.com', pathname: '/playlist', search: '?list=WL', reload: () => { reloads++; } };
   const start = code.indexOf("  'use strict';\n  const page=typeof unsafeWindow");
   const feature = code.slice(start, code.lastIndexOf('})();\n})();'));
-  vm.runInNewContext('(function () {\n' + feature + '})();', { unsafeWindow: page, window: page, document: documentStub, location, URLSearchParams, TextEncoder, crypto: globalThis.crypto, setTimeout: fn => setTimeout(fn, 0), setInterval: fn => { tick = fn; } });
+  vm.runInNewContext('(function () {\n' + feature + '})();', { unsafeWindow: page, window: page, document: documentStub, location, URL, URLSearchParams, TextEncoder, crypto: globalThis.crypto, setTimeout: fn => setTimeout(fn, 0), setInterval: fn => { tick = fn; } });
   const status = created.find(node => node.role === 'status');
   return {
-    buttons, edits, menus, location,
+    buttons, edits, menus, location, rows,
     panel: () => created.find(node => node.role === 'group'),
     body: documentStub.body,
     tick: () => tick(),
@@ -208,6 +224,7 @@ function fakeYouTube(lengths, respond = () => null) {
     settled: () => until(() => reloads || buttons.some(node => node.textContent === 'Close')),
     reloads: () => reloads,
     order: () => order.map(video => video.seconds),
+    ids: () => order.map(video => video.id),
   };
 }
 
@@ -281,4 +298,42 @@ test('a failure stays on screen instead of reloading', async () => {
 test('a refused request reports its status', async () => {
   const { call } = firefoxLikeRequest(() => ({ ok: false, status: 403, text: async () => '' }));
   await assert.rejects(call('browse', { browseId: 'VLWL' }), /HTTP 403/);
+});
+
+const press = node => node.listeners.click({ preventDefault() {}, stopPropagation() {} });
+
+test('each video gets a Remove from Watch Later button that removes it and hides the row', async () => {
+  const youtube = fakeYouTube([30, 10, 20]);
+  const [, middle] = youtube.rows;
+  assert.ok(youtube.rows.every(entry => entry.button()));
+  press(middle.button());
+  await youtube.until(() => middle.style.display === 'none');
+  assert.deepEqual(youtube.edits.at(-1), [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'set-v1' }]);
+  assert.deepEqual(youtube.ids(), ['v0', 'v2']);
+  youtube.tick();
+  assert.equal(middle.style.display, 'none');
+  assert.equal(middle.meta.children.length, 1);
+});
+
+test('a row YouTube reuses for another video shows again, and buttons leave other playlists', async () => {
+  const youtube = fakeYouTube([30, 10]);
+  const [first] = youtube.rows;
+  press(first.button());
+  await youtube.until(() => first.style.display === 'none');
+  first.href = '/watch?v=other&list=WL&index=1';
+  youtube.tick();
+  assert.equal(first.style.display, '');
+  youtube.location.search = '?list=PL123';
+  youtube.tick();
+  assert.ok(youtube.rows.every(entry => !entry.button()));
+});
+
+test('a failed removal keeps the video and says so on the button', async () => {
+  const youtube = fakeYouTube([30, 10], url => (url.includes('edit_playlist') ? { ok: false, status: 403, text: async () => '' } : null));
+  const [first] = youtube.rows;
+  press(first.button());
+  await youtube.until(() => first.button().title);
+  assert.match(first.button().title, /HTTP 403/);
+  assert.notEqual(first.style.display, 'none');
+  assert.deepEqual(youtube.ids(), ['v0', 'v1']);
 });

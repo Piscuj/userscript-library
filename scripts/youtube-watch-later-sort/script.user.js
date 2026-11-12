@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Watch Later Sort
 // @namespace    piscuj.youtube.watch-later-sort
-// @version      1.2.0
+// @version      1.3.0
 // @description  Sort your YouTube Watch Later playlist from shortest to longest video and save the order.
 // @updateURL    https://piscuj.github.io/userscript-library/scripts/youtube-watch-later-sort/script.meta.js
 // @downloadURL  https://piscuj.github.io/userscript-library/scripts/youtube-watch-later-sort/script.user.js
@@ -158,7 +158,7 @@ function createControlReporter(config, env) {
   return {onLibrary,observe,scope,valid,write,record,invalidate,snapshot,intervals,start,flush:()=>queue};
 }
 
-const cc=createControlReporter({"id":"youtube-watch-later-sort","version":"1.2.0","services":["youtube"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
+const cc=createControlReporter({"id":"youtube-watch-later-sort","version":"1.3.0","services":["youtube"]},typeof window==='undefined'?globalThis:{Date,crypto:window.crypto,navigator:window.navigator,location:window.location,document:window.document,window,pageWindow:typeof unsafeWindow==='object'?unsafeWindow:window,addEventListener:window.addEventListener.bind(window),postMessage:window.postMessage.bind(window),setInterval:window.setInterval.bind(window),GM:typeof GM==='object'?GM:undefined,GM_info:typeof GM_info==='object'?GM_info:undefined,GM_getValue:typeof GM_getValue==='function'?GM_getValue:undefined,GM_setValue:typeof GM_setValue==='function'?GM_setValue:undefined});
 if(cc.onLibrary())return;
 (function () {
   'use strict';
@@ -379,7 +379,81 @@ if(cc.onLibrary())return;
       showStart();
     }
   }
-  setInterval(syncPanel,500);
+
+  // Remove from Watch Later under each video, using the same playlist edit as YouTube's own menu.
+  const TRASH_ICON='M7 21q-.825 0-1.412-.587Q5 19.825 5 19V6H4V4h5V3h6v1h5v2h-1v13q0 .825-.587 1.413Q17.825 21 17 21ZM17 6H7v13h10ZM9 17h2V8H9Zm4 0h2V8h-2Z';
+  const REMOVE_LABEL='Remove from Watch Later';
+  let entryIds=new Map();
+  function videoIdOf(row) {
+    const href=row.querySelector('a#video-title')?.getAttribute('href');
+    return href?new URL(href,location.origin).searchParams.get('v'):null;
+  }
+  async function entryIdOf(videoId) {
+    if(!entryIds.has(videoId))entryIds=new Map((await readWatchLater()).map(item=>[item.videoId,item.setVideoId]));
+    const entryId=entryIds.get(videoId);
+    if(!entryId)throw Error('This video is no longer in Watch Later.');
+    return entryId;
+  }
+  async function removeVideo(row,element,label) {
+    const videoId=videoIdOf(row);
+    if(!videoId||busy||element.disabled)return;
+    element.disabled=true;
+    element.title='';
+    label.textContent='Removing…';
+    try {
+      const response=await callYouTube('browse/edit_playlist',{playlistId:PLAYLIST_ID,actions:[{action:'ACTION_REMOVE_VIDEO',setVideoId:await entryIdOf(videoId)}]});
+      if(response.status!=='STATUS_SUCCEEDED')throw Error('YouTube did not remove the video.');
+      entryIds.delete(videoId);
+      row.dataset.wlRemoved=videoId;
+      row.style.display='none';
+      label.textContent=REMOVE_LABEL;
+    } catch(error) {
+      label.textContent='Couldn’t remove. Try again';
+      element.title=error.message;
+    } finally {
+      element.disabled=false;
+    }
+  }
+  function removeButton(row) {
+    const element=document.createElement('button');
+    element.type='button';
+    element.className='wl-remove';
+    Object.assign(element.style,{display:'inline-flex',alignItems:'center',gap:'6px',height:'32px',marginTop:'8px',padding:'0 12px 0 8px',border:'0',borderRadius:'16px',font:'500 13px Roboto,Arial,sans-serif',cursor:'pointer',background:'rgba(255,255,255,.1)',color:'#f1f1f1'});
+    const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    icon.setAttribute('viewBox','0 0 24 24');
+    icon.setAttribute('width','20');
+    icon.setAttribute('height','20');
+    icon.setAttribute('aria-hidden','true');
+    icon.setAttribute('fill','currentColor');
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d',TRASH_ICON);
+    icon.append(path);
+    const label=document.createElement('span');
+    label.textContent=REMOVE_LABEL;
+    element.append(icon,label);
+    element.addEventListener('mouseenter',()=>{element.style.background='rgba(255,255,255,.2)';});
+    element.addEventListener('mouseleave',()=>{element.style.background='rgba(255,255,255,.1)';});
+    element.addEventListener('click',event=>{
+      event.preventDefault();
+      event.stopPropagation();
+      void removeVideo(row,element,label);
+    });
+    return element;
+  }
+  // YouTube reuses rows for other videos and other playlists, so only a row still showing
+  // the removed video stays hidden, and the buttons go away outside Watch Later.
+  function syncRemoveButtons() {
+    const watchLater=isWatchLater();
+    for(const row of document.querySelectorAll('ytd-playlist-video-renderer')) {
+      const removed=row.dataset.wlRemoved;
+      if(removed&&(!watchLater||removed!==videoIdOf(row))){delete row.dataset.wlRemoved;row.style.display='';}
+      const meta=row.querySelector('#meta'),existing=meta?.querySelector(':scope > .wl-remove');
+      if(!watchLater)existing?.remove();
+      else if(meta&&!existing)meta.append(removeButton(row));
+    }
+  }
+  setInterval(()=>{syncPanel();syncRemoveButtons();},500);
   syncPanel();
+  syncRemoveButtons();
 })();
 })();

@@ -1,4 +1,7 @@
 {
+  "1.3.0": [
+    "Add a Remove from Watch Later button under each video."
+  ],
   "1.2.0": [
     "Move the Sort by length button below Play all."
   ],
