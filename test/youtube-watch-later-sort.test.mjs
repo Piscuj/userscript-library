@@ -207,10 +207,12 @@ function fakeYouTube(lengths, respond = () => null) {
   };
   const rows = order.map(video => row(video.id));
   let tick = () => {};
+  // The one-second hiding delay is held until a test fires it; everything else runs at once.
+  const hideTimers = [];
   const location = { origin: 'https://www.youtube.com', pathname: '/playlist', search: '?list=WL', reload: () => { reloads++; } };
   const start = code.indexOf("  'use strict';\n  const page=typeof unsafeWindow");
   const feature = code.slice(start, code.lastIndexOf('})();\n})();'));
-  vm.runInNewContext('(function () {\n' + feature + '})();', { unsafeWindow: page, window: page, document: documentStub, location, URL, URLSearchParams, TextEncoder, crypto: globalThis.crypto, setTimeout: fn => setTimeout(fn, 0), setInterval: fn => { tick = fn; } });
+  vm.runInNewContext('(function () {\n' + feature + '})();', { unsafeWindow: page, window: page, document: documentStub, location, URL, URLSearchParams, TextEncoder, crypto: globalThis.crypto, setTimeout: (fn, ms) => (ms === 1000 ? hideTimers.push(fn) : setTimeout(fn, 0)), clearTimeout: id => { if (id) hideTimers[id - 1] = null; }, setInterval: fn => { tick = fn; } });
   const status = created.find(node => node.role === 'status');
   return {
     buttons, edits, menus, location, rows,
@@ -225,6 +227,8 @@ function fakeYouTube(lengths, respond = () => null) {
     reloads: () => reloads,
     order: () => order.map(video => video.seconds),
     ids: () => order.map(video => video.id),
+    hideTimersPending: () => hideTimers.filter(Boolean).length,
+    fireHideTimers: () => hideTimers.forEach((fn, index) => { hideTimers[index] = null; fn?.(); }),
   };
 }
 
@@ -302,14 +306,17 @@ test('a refused request reports its status', async () => {
 
 const press = node => node.listeners.click({ preventDefault() {}, stopPropagation() {} });
 
-test('each video gets a Remove from Watch Later button that removes it and hides the row', async () => {
+test('each video gets a Remove from Watch Later button that removes it and hides the row a second later', async () => {
   const youtube = fakeYouTube([30, 10, 20]);
   const [, middle] = youtube.rows;
   assert.ok(youtube.rows.every(entry => entry.button()));
   press(middle.button());
-  await youtube.until(() => middle.style.display === 'none');
+  await youtube.until(() => middle.style.opacity === '.5');
   assert.deepEqual(youtube.edits.at(-1), [{ action: 'ACTION_REMOVE_VIDEO', setVideoId: 'set-v1' }]);
   assert.deepEqual(youtube.ids(), ['v0', 'v2']);
+  assert.notEqual(middle.style.display, 'none');
+  youtube.fireHideTimers();
+  assert.equal(middle.style.display, 'none');
   youtube.tick();
   assert.equal(middle.style.display, 'none');
   assert.equal(middle.meta.children.length, 1);
@@ -319,7 +326,9 @@ test('a row YouTube reuses for another video shows again, and buttons leave othe
   const youtube = fakeYouTube([30, 10]);
   const [first] = youtube.rows;
   press(first.button());
-  await youtube.until(() => first.style.display === 'none');
+  await youtube.until(() => first.style.opacity === '.5');
+  youtube.fireHideTimers();
+  assert.equal(first.style.display, 'none');
   first.href = '/watch?v=other&list=WL&index=1';
   youtube.tick();
   assert.equal(first.style.display, '');
@@ -336,4 +345,18 @@ test('a failed removal keeps the video and says so on the button', async () => {
   assert.match(first.button().title, /HTTP 403/);
   assert.notEqual(first.style.display, 'none');
   assert.deepEqual(youtube.ids(), ['v0', 'v1']);
+});
+
+test('rows removed in quick succession stay until a second after the last click', async () => {
+  const youtube = fakeYouTube([30, 10, 20]);
+  const [first, second] = youtube.rows;
+  press(first.button());
+  await youtube.until(() => first.style.opacity === '.5');
+  press(second.button());
+  await youtube.until(() => second.style.opacity === '.5');
+  assert.equal(youtube.hideTimersPending(), 1);
+  assert.ok([first, second].every(entry => entry.style.display !== 'none'));
+  youtube.fireHideTimers();
+  assert.ok([first, second].every(entry => entry.style.display === 'none'));
+  assert.deepEqual(youtube.ids(), ['v2']);
 });

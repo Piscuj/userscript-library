@@ -59,7 +59,7 @@
       "instructions": [
         "Open Watch Later while signed in and click Sort by length below Play all. The list is sorted straight away, with no confirmation, and the page reloads to show it.",
         "The new order is saved to your account and replaces the old one, which can't be restored. Videos without a length, such as live streams, go last.",
-        "Each video has Remove from Watch Later under its channel name. One click removes it, with no confirmation.",
+        "Each video has Remove from Watch Later under its channel name. One click removes it, with no confirmation. Removed videos stay dimmed until a second after your last click, then leave the list.",
         "New videos join the list wherever YouTube puts them. Sort again to place them. If a sort is stopped or fails, sorting again finishes the job.",
         "The script uses YouTube's private interface with your signed-in session, on youtube.com only. YouTube can change that interface at any time; if it does, the script stops before moving anything where it can detect the change."
       ]
